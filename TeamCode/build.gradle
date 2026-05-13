@@ -93,4 +93,9 @@ dependencies {
     // root build.gradle's buildscript ext block so it's shared with the Load
     // Gradle plugin's classpath entry.
     implementation "com.github.6165-MSET-Cuttlefish.Sloth:Sloth:${slothRef}"
+
+    // FTC Dashboard from the 6165 slothboard fork. Pulls the 6165 Sloth fork
+    // transitively (slothboard's own POM declares it), so versions stay in
+    // sync as long as slothboard's pinned slothRef matches the one above.
+    implementation "com.github.6165-MSET-Cuttlefish.slothboard:dashboard:${slothboardRef}"
 }

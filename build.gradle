@@ -9,6 +9,9 @@ buildscript {
     // Pinned Sloth commit on the 6165 fork. Bump alongside any future audit
     // follow-ups in https://github.com/6165-MSET-Cuttlefish/Sloth.
     ext.slothRef = '9bcb914'
+    // Pinned slothboard commit on the 6165 fork. The published v1.0.0 tag
+    // predates the Sloth-fork swap; bump to a newer tag once one is cut.
+    ext.slothboardRef = 'edd4aca'
     repositories {
         mavenCentral()
         google()
