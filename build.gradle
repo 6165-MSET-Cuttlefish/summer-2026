@@ -6,14 +6,19 @@
 
 buildscript {
     ext.kotlin_version = '2.3.21'
+    // Pinned Sloth commit on the 6165 fork. Bump alongside any future audit
+    // follow-ups in https://github.com/6165-MSET-Cuttlefish/Sloth.
+    ext.slothRef = '9bcb914'
     repositories {
         mavenCentral()
         google()
+        maven { url 'https://jitpack.io' }
     }
     dependencies {
         // Note for FTC Teams: Do not modify this yourself.
         classpath 'com.android.tools.build:gradle:8.7.0'
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+        classpath "com.github.6165-MSET-Cuttlefish.Sloth:Load:${slothRef}"
     }
 }
 
@@ -23,6 +28,10 @@ allprojects {
     repositories {
         mavenCentral()
         google()
+        // Sloth runtime fork (and its Load plugin classpath above).
+        maven { url 'https://jitpack.io' }
+        // Sloth's transitive Sinister dependency lives here.
+        maven { url 'https://repo.dairy.foundation/releases' }
     }
 }
 

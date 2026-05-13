@@ -2,6 +2,8 @@ import java.text.SimpleDateFormat
 
 apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
+// Sloth hot-reload deployment tasks (assembleSloth, dexSloth, deploySloth, etc.).
+apply plugin: 'dev.frozenmilk.sinister.sloth.load'
 
 android {
     compileSdk 34
@@ -86,4 +88,9 @@ dependencies {
 
     implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0"
     implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0"
+
+    // Sloth hot-reload runtime from the 6165 fork. slothRef is defined in the
+    // root build.gradle's buildscript ext block so it's shared with the Load
+    // Gradle plugin's classpath entry.
+    implementation "com.github.6165-MSET-Cuttlefish.Sloth:Sloth:${slothRef}"
 }
