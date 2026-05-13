@@ -2,6 +2,22 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Project context
+
+This is the **pre-season-only** summer 2026 repository for **FIRST Tech Challenge team 6165 MSET Cuttlefish** (Saratoga, CA — NorCal region, competing since 2012). It is intentionally a learning + testing scaffold ahead of the **BIOBUZZ™** season; there is no real robot code in here yet. Once BIOBUZZ kicks off, formal-season competition code moves to a separate repo — work here stops then.
+
+**Season chronology:**
+
+- **2025–2026 — DECODE™** (just-finished season; FIRST AGE™ program). Archaeology-themed: collect/shoot/align "artifacts," manage gates, overflow scoring. This repo is not for DECODE.
+- **2026–2027 — BIOBUZZ™** (upcoming season; FIRST CANOPY™ program; kickoff **September 12, 2026**). Nature/pollination theme. Game element is **Pollen** — ~2.8" yellow plastic balls. Full game manual and robot rules drop at kickoff; pre-kickoff work is constrained to drivetrain + intake experimentation against the published *StarterBot Base* designs and the pre-season pollen challenges (intaking from open field, from corners/walls, autonomous navigation between known points).
+
+**What this means for code written here:** assume the field, the scoring rules, and the legal robot config are not yet known. Don't hard-code field-element counts, scoring tables, alliance-station coordinates, or auto path constants that imply a specific BIOBUZZ field layout — those will all be invalidated at kickoff, at which point this repo's job is done. Drivetrain code, intake prototypes, sensor wrappers, vision pipelines, dashboard/telemetry plumbing, and Sloth hot-reload workflows are all fair game and may be ported into the in-season repo. When in doubt, build for swappability over a guess at the spec.
+
+**Upstream / sibling repos worth knowing about:**
+
+- `github.com/6165-MSET-Cuttlefish/Sloth` — team's audit-fixed fork of Sloth (consumed here via `ext.slothRef`).
+- `github.com/6165-MSET-Cuttlefish/slothboard` — team's fork of `Dairy-Foundation/ftc-dashboard` (consumed here via `ext.slothboardRef`).
+
 ## Keep this file fresh
 
 Claude maintains this file, not the user. After any change that alters how the project is built, deployed, structured, or what its conventions are — update this file in the same commit. Examples that warrant an update: bumping the FTC SDK version, adding/removing a Gradle module, changing the ABI / target SDK, swapping dependency hosting (e.g. moving Sloth off JitPack), introducing a new Gradle task that's part of the dev loop, or codifying a new convention. Updates that are just "I edited file X" do not warrant a CLAUDE.md change.
