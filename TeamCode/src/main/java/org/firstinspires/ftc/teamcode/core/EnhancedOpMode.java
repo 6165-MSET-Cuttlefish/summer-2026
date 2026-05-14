@@ -265,6 +265,15 @@ public abstract class EnhancedOpMode extends OpMode {
         if (robot != null && robot.pathActionScheduler != null) {
             robot.pathActionScheduler.cancelAll();
         }
+        // Modules can now put hardware in a safe state with nothing else racing them.
+        for (int i = 0; i < modules.size(); i++) {
+            try {
+                modules.get(i).stop();
+            } catch (Exception e) {
+                // One bad module shouldn't block the rest from shutting down cleanly.
+                e.printStackTrace();
+            }
+        }
         onEnd();
     }
 
@@ -336,6 +345,7 @@ public abstract class EnhancedOpMode extends OpMode {
     private void readModules() {
         for (int i = 0; i < modules.size(); i++) {
             Module m = modules.get(i);
+            m.refreshTunables();
             long t = profiler.startScope();
             m.read();
             profiler.endScope(m.getReadScopeKey(), t);

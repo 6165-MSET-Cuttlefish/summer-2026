@@ -8,6 +8,7 @@ import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.DoubleSupplier;
 import org.firstinspires.ftc.robotcore.external.Telemetry;
 import org.firstinspires.ftc.teamcode.architecture.telemetry.EnhancedTelemetry;
 import org.firstinspires.ftc.teamcode.core.action.Action;
@@ -27,6 +28,7 @@ public abstract class Module {
     private final List<StateHook> enterHooks = new ArrayList<>();
     private final List<StateHook> exitHooks = new ArrayList<>();
     private final Deque<State> stateHistory = new ArrayDeque<>();
+    private final List<Runnable> tunableRefreshers = new ArrayList<>();
 
     private final ElapsedTime stateTimer = new ElapsedTime();
     private Telemetry telemetry;
@@ -56,8 +58,36 @@ public abstract class Module {
     protected abstract void write();
 
     public void init() {}
+
+    /**
+     * Called once when the OpMode stops. Override to put hardware in a safe state (zero motors,
+     * disable PIDs, retract lifts). Runs after Actions and the path scheduler are cancelled, so
+     * nothing else will be writing the same hardware concurrently.
+     */
+    public void stop() {}
+
     protected void onStateChange() {}
     protected void onTelemetry() {}
+
+    /**
+     * Wire a State's setpoint to a live source — typically a field on a {@code @Config static}
+     * tuning class. The framework re-applies {@code state.setValue(supplier.getAsDouble())} once
+     * per loop before {@link #read()}, so dashboard edits land before the next read uses the value.
+     *
+     * <p>Call after {@link #setStates(State...)} in {@link #initStates()}.
+     */
+    protected final void bindTunable(State state, DoubleSupplier supplier) {
+        Runnable refresh = () -> state.setValue(supplier.getAsDouble());
+        refresh.run();
+        tunableRefreshers.add(refresh);
+    }
+
+    /** Framework hook: called by EnhancedOpMode before each read(). Pulls bound tunables. */
+    final void refreshTunables() {
+        for (int i = 0; i < tunableRefreshers.size(); i++) {
+            tunableRefreshers.get(i).run();
+        }
+    }
 
     /** Render order in the MODULES telemetry section; lower first. */
     public int telemetryOrder() { return 0; }
