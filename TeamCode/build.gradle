@@ -1,7 +1,6 @@
 import java.text.SimpleDateFormat
 
 apply plugin: 'com.android.application'
-apply plugin: 'kotlin-android'
 // Sloth hot-reload deployment tasks (assembleSloth, dexSloth, deploySloth, etc.).
 apply plugin: 'dev.frozenmilk.sinister.sloth.load'
 
@@ -60,12 +59,6 @@ android {
         targetCompatibility JavaVersion.VERSION_1_8
     }
 
-    // Match Kotlin's JVM target to Java's. Without this, Kotlin defaults to whatever
-    // JDK Gradle is running on (e.g. 21) and the Java/Kotlin compile tasks disagree.
-    kotlinOptions {
-        jvmTarget = '1.8'
-    }
-
     buildFeatures {
         buildConfig = true
     }
@@ -91,9 +84,6 @@ dependencies {
 
     implementation 'com.pedropathing:ftc:2.1.2'
     implementation 'com.pedropathing:telemetry:1.0.0'
-
-    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0"
-    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0"
 
     // Sloth hot-reload runtime from the 6165 fork. slothRef is defined in the
     // root build.gradle's buildscript ext block so it's shared with the Load

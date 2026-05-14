@@ -232,6 +232,11 @@ public abstract class EnhancedOpMode extends OpMode {
         primaryLoop();
         profiler.mark("primaryLoop");
 
+        // Pump every scheduled action once. Runs on this thread, between user code and hardware
+        // writes, so action-applied state lands in the same write pass.
+        Actions.update();
+        profiler.mark("actions");
+
         writeModules();
         profiler.mark("writeModules");
 

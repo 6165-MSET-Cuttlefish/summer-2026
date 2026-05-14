@@ -5,7 +5,6 @@
  */
 
 buildscript {
-    ext.kotlin_version = '2.3.21'
     // Pinned Sloth commit on the 6165 fork. Bump alongside any future audit
     // follow-ups in https://github.com/6165-MSET-Cuttlefish/Sloth.
     ext.slothRef = '9bcb914'
@@ -20,7 +19,6 @@ buildscript {
     dependencies {
         // Note for FTC Teams: Do not modify this yourself.
         classpath 'com.android.tools.build:gradle:8.7.0'
-        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
         classpath "com.github.6165-MSET-Cuttlefish.Sloth:Load:${slothRef}"
     }
 }
