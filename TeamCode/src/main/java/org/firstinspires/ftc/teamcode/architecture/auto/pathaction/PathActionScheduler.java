@@ -141,9 +141,11 @@ public class PathActionScheduler {
         PathActionSegment segment = getCurrentSegment();
         if (segment == null) return;
 
-        // Hard timeout fires from any state.
+        // Hard timeout fires from any state. Honor after-actions before advancing so things
+        // like "shoot the preload after this drive" still fire when the drive times out.
         if (currentState != SchedulerState.IDLE && hasTimedOut(segment)) {
             if (currentState == SchedulerState.PATH_RUNNING) stopCurrentPath();
+            if (kickOffAfterActions(segment)) return;
             advanceToNextSegment();
             return;
         }
@@ -301,9 +303,33 @@ public class PathActionScheduler {
         else follower().breakFollowing();
     }
 
+    /**
+     * Abort the current segment's path-following (if any) and advance. After-actions on the
+     * skipped segment are still kicked off so cleanup like "shoot the preload" runs even when
+     * the path is interrupted.
+     */
     public void skipCurrentSegment() {
-        stopCurrentPath();
+        PathActionSegment segment = getCurrentSegment();
+        if (segment == null) return;
+        if (currentState == SchedulerState.PATH_RUNNING) stopCurrentPath();
+        if (kickOffAfterActions(segment)) return;
         advanceToNextSegment();
+    }
+
+    /**
+     * Fire the segment's after-actions and transition to AFTER_ACTION so the normal state
+     * machine drains them. Returns false (no transition) when the segment has no after-actions
+     * or we're already past them.
+     */
+    private boolean kickOffAfterActions(PathActionSegment segment) {
+        if (currentState == SchedulerState.AFTER_ACTION
+                || currentState == SchedulerState.WAITING
+                || currentState == SchedulerState.COMPLETED) {
+            return false;
+        }
+        if (segment.getAfterActions().isEmpty()) return false;
+        executeAfterActions(segment);
+        return true;
     }
 
     // ─── condition / timeout helpers ─────────────────────────────────────────
