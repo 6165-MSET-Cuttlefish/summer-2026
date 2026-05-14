@@ -71,8 +71,7 @@ public class IntegratedPathBuilder {
 
     public IntegratedPathBuilder addPath(Path path) {
         pedroBuilder.addPath(path);
-        Pose end = path.endPose();
-        lastPose = new Pose(end.getX(), end.getY(), end.getHeading());
+        lastPose = path.endPose();
         return this;
     }
 
@@ -85,8 +84,7 @@ public class IntegratedPathBuilder {
     public IntegratedPathBuilder addPaths(Path... paths) {
         pedroBuilder.addPaths(paths);
         if (paths.length > 0) {
-            Pose end = paths[paths.length - 1].endPose();
-            lastPose = new Pose(end.getX(), end.getY(), end.getHeading());
+            lastPose = paths[paths.length - 1].endPose();
         }
         return this;
     }

@@ -3,6 +3,7 @@ package org.firstinspires.ftc.teamcode.architecture.auto;
 import static org.firstinspires.ftc.teamcode.core.Robot.robot;
 
 import com.acmerobotics.dashboard.canvas.Canvas;
+import com.pedropathing.ftc.FTCCoordinates;
 import com.pedropathing.geometry.Pose;
 import com.pedropathing.math.Vector;
 import com.pedropathing.paths.Path;
@@ -11,9 +12,6 @@ import com.pedropathing.util.PoseHistory;
 
 public class FieldVisualization {
     public static final double ROBOT_RADIUS = 7.5;
-    /** Cap how many trailing pose-history points are drawn. PoseHistory grows over a match; drawing
-     *  thousands of strokeLines per loop costs ms on the dashboard. */
-    public static final int MAX_POSE_HISTORY_POINTS = 200;
 
     public static final String COLOR_ROBOT = "#FFFFFF";
     public static final String COLOR_PATH = "#ea8743";
@@ -22,25 +20,19 @@ public class FieldVisualization {
 
     private FieldVisualization() {}
 
-    /** Convert a full Pose (x, y, heading) from the original 144×144 system
-     *  to the field‑centered system. */
-    public static Pose toField(Pose PP) {
-        double transX = PP.getX() - 72.0;
-        double transY = PP.getY() - 72.0;
-
-        double fieldX = transY;          // original Y → new X
-        double fieldY = -transX;         // -original X → new Y
-
-        double fieldTheta = PP.getHeading() - Math.toRadians(90.0);
-
-        return new Pose(fieldX, fieldY, fieldTheta);
+    /** Convert a Pedro-coordinates pose to the FTC-standard (field-centered) frame. */
+    public static Pose toField(Pose pedroPose) {
+        return pedroPose.getAsCoordinateSystem(FTCCoordinates.INSTANCE);
     }
+
+    /**
+     * (x, y) variant that skips the per-point Pose allocation. Math mirrors
+     * {@link FTCCoordinates#convertFromPedro} — translate by -(72,72), rotate -π/2.
+     */
     public static double[] toField(double x, double y) {
         double transX = x - 72.0;
         double transY = y - 72.0;
-        double fieldX = transY;
-        double fieldY = -transX;
-        return new double[]{fieldX, fieldY};
+        return new double[]{ transY, -transX };
     }
 
     public static void init() {}
@@ -95,8 +87,7 @@ public class FieldVisualization {
         double[] y = poseHistory.getYPositionsArray();
 
         int length = Math.min(x.length, y.length);
-        int start = Math.max(0, length - MAX_POSE_HISTORY_POINTS);
-        for (int i = start; i < length - 1; i++) {
+        for (int i = 0; i < length - 1; i++) {
             double[] p1 = toField(x[i], y[i]);
             double[] p2 = toField(x[i + 1], y[i + 1]);
             canvas.strokeLine(p1[0], p1[1], p2[0], p2[1]);

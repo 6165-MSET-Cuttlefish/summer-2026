@@ -113,7 +113,7 @@ public class PathActionBuilder {
                 .moduleStates(drainPendingStates())
                 .enabled(enabled)
                 .build());
-        lastPathEndPose = copyOf(targetPose);
+        lastPathEndPose = targetPose;
         return this;
     }
 
@@ -165,7 +165,7 @@ public class PathActionBuilder {
      *                        default start pose; the actual path uses the live robot pose.
      */
     public PathActionBuilder buildPathDeferred(Pose declaredEndPose, Consumer<IntegratedPathBuilder> body) {
-        if (enabled) lastPathEndPose = copyOf(declaredEndPose);
+        if (enabled) lastPathEndPose = declaredEndPose;
 
         Supplier<PathActionSegment.Resolved> resolver = () -> {
             IntegratedPathBuilder pb = new IntegratedPathBuilder(follower().getPose(), follower().pathBuilder());
@@ -300,7 +300,7 @@ public class PathActionBuilder {
     private PathActionSegment buildPathSegment(
             PathChain path, List<Action> duringActions, boolean holdEnd,
             Integer pathTimeoutMs, Double holdAtDistance) {
-        if (enabled) lastPathEndPose = copyOf(path.endPose());
+        if (enabled) lastPathEndPose = path.endPose();
         List<Action> allDuring = new ArrayList<>(duringActions);
         allDuring.addAll(drainPendingDuringActions());
         PathActionSegment.Builder b = new PathActionSegment.Builder()
@@ -323,10 +323,6 @@ public class PathActionBuilder {
                 .moduleStates(drainPendingStates())
                 .enabled(enabled)
                 .build();
-    }
-
-    private static Pose copyOf(Pose p) {
-        return new Pose(p.getX(), p.getY(), p.getHeading());
     }
 
     private static boolean posesApproxEqual(Pose a, Pose b) {

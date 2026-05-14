@@ -5,24 +5,25 @@ import com.pedropathing.geometry.Pose;
 import org.firstinspires.ftc.teamcode.core.AllianceColor;
 import org.firstinspires.ftc.teamcode.core.Context;
 
-public class FieldPose {
+/**
+ * Pose helpers tied to {@link Context#allianceColor}. Path geometry can be authored once for
+ * the RED side and these helpers will mirror to BLUE when the alliance switches.
+ */
+public final class FieldPose {
     private FieldPose() {}
 
     /**
-     * Mirror a RED-side pose to BLUE if Context.allianceColor is BLUE. Field width comes from
-     * {@link FieldConfig#fieldWidthInches} so this stays season-portable.
+     * Mirror a RED-side pose to BLUE if {@link Context#allianceColor} is BLUE. Uses Pedro's
+     * built-in {@link Pose#mirror(double)} (line 313) so the math stays in sync with Pedro's
+     * coordinate-system semantics.
      */
-    public static Pose ColorPose(double x, double y, double heading) {
-        return ColorPose(x, y, heading, FieldConfig.fieldWidthInches);
+    public static Pose colorPose(double x, double y, double heading) {
+        return colorPose(x, y, heading, FieldConfig.fieldWidthInches);
     }
 
-    /** Same as {@link #ColorPose(double, double, double)} with an explicit field width. */
-    public static Pose ColorPose(double x, double y, double heading, double fieldWidth) {
-        if (Context.allianceColor.equals(AllianceColor.BLUE)) {
-            x = fieldWidth - x;
-            heading = Math.toRadians(180) - heading;
-        }
-
-        return new Pose(x, y, heading);
+    /** Same as {@link #colorPose(double, double, double)} with an explicit field width. */
+    public static Pose colorPose(double x, double y, double heading, double fieldWidth) {
+        Pose red = new Pose(x, y, heading);
+        return Context.allianceColor == AllianceColor.BLUE ? red.mirror(fieldWidth) : red;
     }
 }

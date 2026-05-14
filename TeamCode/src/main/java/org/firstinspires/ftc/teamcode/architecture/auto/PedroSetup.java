@@ -63,7 +63,9 @@ public final class PedroSetup {
     // Pedro 2.x defaults are (tValue=0.995, velocity=0.1, translational=0.1, heading=0.007,
     // timeout=100ms, brakingStrength=1, bezierSearchLimit=10, brakingStart=1). Start with
     // those and tune per-path via IntegratedPathBuilder.setConstraints(...) where needed.
-    public static PathConstraints pathConstraints = PathConstraints.defaultConstraints;
+    // .copy() so a downstream FollowerBuilder.pathConstraints(...) call doesn't replace the
+    // shared static and silently change the values we read here.
+    public static PathConstraints pathConstraints = PathConstraints.defaultConstraints.copy();
 
     public static Follower createFollower(HardwareMap hardwareMap) {
         return new FollowerBuilder(followerConstants, hardwareMap)
