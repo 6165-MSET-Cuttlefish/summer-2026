@@ -1,9 +1,6 @@
 package org.firstinspires.ftc.teamcode.core;
 
 import androidx.annotation.Nullable;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
 import org.firstinspires.ftc.robotcore.external.Func;
 import org.firstinspires.ftc.robotcore.external.Telemetry;
 
@@ -26,7 +23,7 @@ public class EnhancedTelemetry implements Telemetry {
     private final Telemetry dashTelemetry;
     private int defaultFontSize = FONT_NORMAL;
     /** Singleton used by lazy-mode addData calls when both backends are disabled. */
-    private static final Item EMPTY_ITEM = new EnhancedItem(Collections.<Item>emptyList());
+    private static final Item EMPTY_ITEM = new EnhancedItem(null, null);
 
     public EnhancedTelemetry(Telemetry dsTelemetry, Telemetry dashTelemetry) {
         this.dsTelemetry = dsTelemetry;
@@ -88,11 +85,11 @@ public class EnhancedTelemetry implements Telemetry {
     // ─── DS-only / Dashboard-only convenience ────────────────────────────────
 
     public Item addDSLargeData(String caption, Object value) {
-        if (!enableDSTelemetry) return new EnhancedItem(new ArrayList<>(0));
+        if (!enableDSTelemetry) return EMPTY_ITEM;
         Item it = dsTelemetry.addData(
                 htmlSize(FONT_SMALL, htmlBold(caption)),
                 htmlColorSize(COLOR_VALUE, FONT_XLARGE, String.valueOf(value)));
-        return new EnhancedItem(singleton(it));
+        return new EnhancedItem(it, null);
     }
 
     public EnhancedTelemetry addDSData(String caption, Object value) {
@@ -132,54 +129,54 @@ public class EnhancedTelemetry implements Telemetry {
 
     @Override
     public Item addData(String caption, String format, Object... args) {
-        if (optimizeTelemetryLazyFormat) {
-            if (!enableDSTelemetry && !enableDashboardTelemetry) return EMPTY_ITEM;
-            List<Item> items = new ArrayList<>(2);
-            if (enableDSTelemetry) {
-                items.add(dsTelemetry.addData(fmtCaption(caption), fmtValue(String.format(format, args))));
-            }
-            if (enableDashboardTelemetry) {
-                items.add(dashTelemetry.addData(caption, format, args));
-            }
-            return new EnhancedItem(items);
+        if (optimizeTelemetryLazyFormat && !enableDSTelemetry && !enableDashboardTelemetry) {
+            return EMPTY_ITEM;
         }
-        List<Item> items = new ArrayList<>(2);
-        if (enableDSTelemetry) items.add(dsTelemetry.addData(fmtCaption(caption), fmtValue(String.format(format, args))));
-        if (enableDashboardTelemetry) items.add(dashTelemetry.addData(caption, format, args));
-        return new EnhancedItem(items);
+        Item dsItem = enableDSTelemetry
+                ? dsTelemetry.addData(fmtCaption(caption), fmtValue(String.format(format, args)))
+                : null;
+        Item dashItem = enableDashboardTelemetry
+                ? dashTelemetry.addData(caption, format, args)
+                : null;
+        return new EnhancedItem(dsItem, dashItem);
     }
 
     @Override
     public Item addData(String caption, Object value) {
-        if (optimizeTelemetryLazyFormat) {
-            if (!enableDSTelemetry && !enableDashboardTelemetry) return EMPTY_ITEM;
-            List<Item> items = new ArrayList<>(2);
-            if (enableDSTelemetry) items.add(dsTelemetry.addData(fmtCaption(caption), fmtValue(value)));
-            if (enableDashboardTelemetry) items.add(dashTelemetry.addData(caption, value));
-            return new EnhancedItem(items);
+        if (optimizeTelemetryLazyFormat && !enableDSTelemetry && !enableDashboardTelemetry) {
+            return EMPTY_ITEM;
         }
-        List<Item> items = new ArrayList<>(2);
-        if (enableDSTelemetry) items.add(dsTelemetry.addData(fmtCaption(caption), fmtValue(value)));
-        if (enableDashboardTelemetry) items.add(dashTelemetry.addData(caption, value));
-        return new EnhancedItem(items);
+        Item dsItem = enableDSTelemetry
+                ? dsTelemetry.addData(fmtCaption(caption), fmtValue(value))
+                : null;
+        Item dashItem = enableDashboardTelemetry
+                ? dashTelemetry.addData(caption, value)
+                : null;
+        return new EnhancedItem(dsItem, dashItem);
     }
 
     @Override
     public <T> Item addData(String caption, Func<T> valueProducer) {
-        List<Item> items = new ArrayList<>(2);
         Func<String> htmlProducer = () -> fmtValue(valueProducer.value());
-        if (enableDSTelemetry) items.add(dsTelemetry.addData(fmtCaption(caption), htmlProducer));
-        if (enableDashboardTelemetry) items.add(dashTelemetry.addData(caption, valueProducer));
-        return new EnhancedItem(items);
+        Item dsItem = enableDSTelemetry
+                ? dsTelemetry.addData(fmtCaption(caption), htmlProducer)
+                : null;
+        Item dashItem = enableDashboardTelemetry
+                ? dashTelemetry.addData(caption, valueProducer)
+                : null;
+        return new EnhancedItem(dsItem, dashItem);
     }
 
     @Override
     public <T> Item addData(String caption, String format, Func<T> valueProducer) {
-        List<Item> items = new ArrayList<>(2);
         Func<String> htmlProducer = () -> fmtValue(String.format(format, valueProducer.value()));
-        if (enableDSTelemetry) items.add(dsTelemetry.addData(fmtCaption(caption), htmlProducer));
-        if (enableDashboardTelemetry) items.add(dashTelemetry.addData(caption, format, valueProducer));
-        return new EnhancedItem(items);
+        Item dsItem = enableDSTelemetry
+                ? dsTelemetry.addData(fmtCaption(caption), htmlProducer)
+                : null;
+        Item dashItem = enableDashboardTelemetry
+                ? dashTelemetry.addData(caption, format, valueProducer)
+                : null;
+        return new EnhancedItem(dsItem, dashItem);
     }
 
     @Override
@@ -236,18 +233,16 @@ public class EnhancedTelemetry implements Telemetry {
 
     @Override
     public Line addLine() {
-        List<Line> lines = new ArrayList<>(2);
-        if (enableDSTelemetry) lines.add(dsTelemetry.addLine());
-        if (enableDashboardTelemetry) lines.add(dashTelemetry.addLine());
-        return new EnhancedLine(lines);
+        Line dsLine = enableDSTelemetry ? dsTelemetry.addLine() : null;
+        Line dashLine = enableDashboardTelemetry ? dashTelemetry.addLine() : null;
+        return new EnhancedLine(dsLine, dashLine);
     }
 
     @Override
     public Line addLine(String lineCaption) {
-        List<Line> lines = new ArrayList<>(2);
-        if (enableDSTelemetry) lines.add(dsTelemetry.addLine(lineCaption));
-        if (enableDashboardTelemetry) lines.add(dashTelemetry.addLine(lineCaption));
-        return new EnhancedLine(lines);
+        Line dsLine = enableDSTelemetry ? dsTelemetry.addLine(lineCaption) : null;
+        Line dashLine = enableDashboardTelemetry ? dashTelemetry.addLine(lineCaption) : null;
+        return new EnhancedLine(dsLine, dashLine);
     }
 
     @Override
@@ -322,113 +317,137 @@ public class EnhancedTelemetry implements Telemetry {
         return new CombinedLog(dsLog, dashLog);
     }
 
-    private static <T> List<T> singleton(T value) {
-        List<T> out = new ArrayList<>(1);
-        out.add(value);
-        return out;
-    }
-
     // ─── inner fan-out implementations ───────────────────────────────────────
 
+    /** Two-slot fan-out (DS + dashboard) without the per-call ArrayList. Either slot may be
+     *  null when its backend is disabled at the time the item was created. */
     private static class EnhancedItem implements Item {
-        private final List<Item> items;
-        EnhancedItem(List<Item> items) { this.items = items; }
+        @Nullable private final Item ds;
+        @Nullable private final Item dash;
 
-        @Override public String getCaption() { return items.isEmpty() ? "" : items.get(0).getCaption(); }
+        EnhancedItem(@Nullable Item ds, @Nullable Item dash) {
+            this.ds = ds;
+            this.dash = dash;
+        }
+
+        @Override public String getCaption() {
+            if (ds != null) return ds.getCaption();
+            if (dash != null) return dash.getCaption();
+            return "";
+        }
 
         @Override
         public Item setCaption(String caption) {
-            for (int i = 0; i < items.size(); i++) items.get(i).setCaption(caption);
+            if (ds != null) ds.setCaption(caption);
+            if (dash != null) dash.setCaption(caption);
             return this;
         }
 
         @Override
         public Item setValue(String format, Object... args) {
-            for (int i = 0; i < items.size(); i++) items.get(i).setValue(format, args);
+            if (ds != null) ds.setValue(format, args);
+            if (dash != null) dash.setValue(format, args);
             return this;
         }
 
         @Override
         public Item setValue(Object value) {
-            for (int i = 0; i < items.size(); i++) items.get(i).setValue(value);
+            if (ds != null) ds.setValue(value);
+            if (dash != null) dash.setValue(value);
             return this;
         }
 
         @Override
         public <T> Item setValue(Func<T> valueProducer) {
-            for (int i = 0; i < items.size(); i++) items.get(i).setValue(valueProducer);
+            if (ds != null) ds.setValue(valueProducer);
+            if (dash != null) dash.setValue(valueProducer);
             return this;
         }
 
         @Override
         public <T> Item setValue(String format, Func<T> valueProducer) {
-            for (int i = 0; i < items.size(); i++) items.get(i).setValue(format, valueProducer);
+            if (ds != null) ds.setValue(format, valueProducer);
+            if (dash != null) dash.setValue(format, valueProducer);
             return this;
         }
 
         @Override
         public Item setRetained(@Nullable Boolean retained) {
-            for (int i = 0; i < items.size(); i++) items.get(i).setRetained(retained);
+            if (ds != null) ds.setRetained(retained);
+            if (dash != null) dash.setRetained(retained);
             return this;
         }
 
-        @Override public boolean isRetained() { return !items.isEmpty() && items.get(0).isRetained(); }
+        @Override public boolean isRetained() {
+            if (ds != null) return ds.isRetained();
+            if (dash != null) return dash.isRetained();
+            return false;
+        }
 
         @Override
         public Item addData(String caption, String format, Object... args) {
-            for (int i = 0; i < items.size(); i++) items.get(i).addData(caption, format, args);
+            if (ds != null) ds.addData(caption, format, args);
+            if (dash != null) dash.addData(caption, format, args);
             return this;
         }
 
         @Override
         public Item addData(String caption, Object value) {
-            for (int i = 0; i < items.size(); i++) items.get(i).addData(caption, value);
+            if (ds != null) ds.addData(caption, value);
+            if (dash != null) dash.addData(caption, value);
             return this;
         }
 
         @Override
         public <T> Item addData(String caption, Func<T> valueProducer) {
-            for (int i = 0; i < items.size(); i++) items.get(i).addData(caption, valueProducer);
+            if (ds != null) ds.addData(caption, valueProducer);
+            if (dash != null) dash.addData(caption, valueProducer);
             return this;
         }
 
         @Override
         public <T> Item addData(String caption, String format, Func<T> valueProducer) {
-            for (int i = 0; i < items.size(); i++) items.get(i).addData(caption, format, valueProducer);
+            if (ds != null) ds.addData(caption, format, valueProducer);
+            if (dash != null) dash.addData(caption, format, valueProducer);
             return this;
         }
     }
 
     private static class EnhancedLine implements Line {
-        private final List<Line> lines;
-        EnhancedLine(List<Line> lines) { this.lines = lines; }
+        @Nullable private final Line ds;
+        @Nullable private final Line dash;
+
+        EnhancedLine(@Nullable Line ds, @Nullable Line dash) {
+            this.ds = ds;
+            this.dash = dash;
+        }
 
         @Override
         public Item addData(String caption, String format, Object... args) {
-            List<Item> items = new ArrayList<>(lines.size());
-            for (int i = 0; i < lines.size(); i++) items.add(lines.get(i).addData(caption, format, args));
-            return new EnhancedItem(items);
+            Item dsItem = ds != null ? ds.addData(caption, format, args) : null;
+            Item dashItem = dash != null ? dash.addData(caption, format, args) : null;
+            return new EnhancedItem(dsItem, dashItem);
         }
 
         @Override
         public Item addData(String caption, Object value) {
-            List<Item> items = new ArrayList<>(lines.size());
-            for (int i = 0; i < lines.size(); i++) items.add(lines.get(i).addData(caption, value));
-            return new EnhancedItem(items);
+            Item dsItem = ds != null ? ds.addData(caption, value) : null;
+            Item dashItem = dash != null ? dash.addData(caption, value) : null;
+            return new EnhancedItem(dsItem, dashItem);
         }
 
         @Override
         public <T> Item addData(String caption, Func<T> valueProducer) {
-            List<Item> items = new ArrayList<>(lines.size());
-            for (int i = 0; i < lines.size(); i++) items.add(lines.get(i).addData(caption, valueProducer));
-            return new EnhancedItem(items);
+            Item dsItem = ds != null ? ds.addData(caption, valueProducer) : null;
+            Item dashItem = dash != null ? dash.addData(caption, valueProducer) : null;
+            return new EnhancedItem(dsItem, dashItem);
         }
 
         @Override
         public <T> Item addData(String caption, String format, Func<T> valueProducer) {
-            List<Item> items = new ArrayList<>(lines.size());
-            for (int i = 0; i < lines.size(); i++) items.add(lines.get(i).addData(caption, format, valueProducer));
-            return new EnhancedItem(items);
+            Item dsItem = ds != null ? ds.addData(caption, format, valueProducer) : null;
+            Item dashItem = dash != null ? dash.addData(caption, format, valueProducer) : null;
+            return new EnhancedItem(dsItem, dashItem);
         }
     }
 
