@@ -6,17 +6,14 @@ import com.qualcomm.robotcore.hardware.Servo;
 import com.qualcomm.robotcore.hardware.ServoController;
 import com.qualcomm.robotcore.hardware.ServoImplEx;
 
-/**
- * Servo wrapper with position caching and bounds. No voltage compensation — servos run on PWM
- * and aren't power-scaled like motors / CR servos.
- */
+/** Servo wrapper with position caching. No voltage comp — PWM, not power-scaled. */
 public class EnhancedServo implements Servo, PwmControl {
     private final ServoImplEx servo;
     private final WriteCache cache = new WriteCache();
 
     public EnhancedServo(ServoImplEx servo) {
         this.servo = servo;
-        // Servo positions are 0..1, not -1..1.
+        // Servo position range is 0..1, not -1..1 like motor power.
         cache.min = 0.0;
         cache.max = 1.0;
     }
@@ -26,7 +23,7 @@ public class EnhancedServo implements Servo, PwmControl {
     }
 
     public EnhancedServo withCachingTolerance(double tolerance) {
-        cache.tolerance = tolerance;
+        setCachingTolerance(tolerance);
         return this;
     }
 

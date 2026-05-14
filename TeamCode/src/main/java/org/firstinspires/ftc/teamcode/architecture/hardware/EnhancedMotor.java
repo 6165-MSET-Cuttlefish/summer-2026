@@ -27,7 +27,7 @@ public class EnhancedMotor implements DcMotorEx {
     }
 
     public EnhancedMotor withCachingTolerance(double tolerance) {
-        cache.tolerance = tolerance;
+        setCachingTolerance(tolerance);
         return this;
     }
 

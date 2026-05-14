@@ -3,6 +3,18 @@ package org.firstinspires.ftc.teamcode.architecture.hardware;
 import com.qualcomm.robotcore.hardware.AnalogInput;
 import com.qualcomm.robotcore.hardware.HardwareDevice;
 
+import java.util.Objects;
+
+/**
+ * Wraps an analog absolute encoder. Two different reads:
+ * <ul>
+ *   <li>{@link #getAbsoluteAngle()} — single-turn, 0–360°, post-offset/inversion. Always
+ *       reflects the current physical shaft angle.</li>
+ *   <li>{@link #getRelativePosition()} — accumulated multi-turn rotation since the first call,
+ *       multiplied by {@code gearRatio}. The first call snapshots the current shaft as the
+ *       zero reference.</li>
+ * </ul>
+ */
 public class AbsoluteAnalogEncoder implements HardwareDevice {
     protected final AnalogInput analogInput;
     protected final double offset;
@@ -12,7 +24,7 @@ public class AbsoluteAnalogEncoder implements HardwareDevice {
     private double lastRawAngle;
     private boolean initialized;
     private double position;
-    public double delta;
+    private double delta;
 
     public AbsoluteAnalogEncoder(AnalogInput analogInput) {
         this(analogInput, 0.0, 1.0, false);
@@ -20,22 +32,15 @@ public class AbsoluteAnalogEncoder implements HardwareDevice {
 
     public AbsoluteAnalogEncoder(
             AnalogInput analogInput, double offset, double gearRatio, boolean inverted) {
-        this.analogInput = analogInput;
+        this.analogInput = Objects.requireNonNull(analogInput, "analogInput");
         this.offset = offset;
         this.gearRatio = gearRatio;
         this.inverted = inverted;
-        this.lastRawAngle = 0.0;
-        this.initialized = false;
-        this.position = 0.0;
-        this.delta = 0.0;
     }
 
-    /**
-     * Returns the accumulated position in degrees (times gear ratio), starting from 0.
-     * Tracks multi-turn rotation by accumulating wrap-corrected deltas between calls.
-     */
-    public double getPosition() {
-        double rawAngle = getRawEncoderPosition();
+    /** Multi-turn accumulated rotation in degrees × gearRatio, zeroed at first call. */
+    public double getRelativePosition() {
+        double rawAngle = getAbsoluteAngle();
 
         if (!initialized) {
             initialized = true;
@@ -54,16 +59,14 @@ public class AbsoluteAnalogEncoder implements HardwareDevice {
         return position * gearRatio;
     }
 
-    /**
-     * Resets the accumulated position to 0. The next getPosition() call will
-     * re-snapshot the current physical angle as the new reference and report 0.
-     */
+    /** Re-snapshot the current shaft angle as the new zero reference. */
     public void zero() {
         position = 0.0;
         initialized = false;
     }
 
-    public double getRawEncoderPosition() {
+    /** Single-turn shaft angle, 0–360°, after applying offset and inversion. */
+    public double getAbsoluteAngle() {
         double encoderPosition = getVoltageAsAngle();
 
         if (inverted) {
@@ -84,6 +87,7 @@ public class AbsoluteAnalogEncoder implements HardwareDevice {
         return (voltage / maxVoltage) * 360.0;
     }
 
+    /** Last shaft delta (degrees) seen by {@link #getRelativePosition()}. */
     public double getDelta() {
         return delta;
     }
@@ -97,13 +101,8 @@ public class AbsoluteAnalogEncoder implements HardwareDevice {
     }
 
     public double getNormalizedValue() {
-        if (analogInput == null) {
-            return Double.NaN;
-        }
         double maxVoltage = analogInput.getMaxVoltage();
-        if (maxVoltage == 0.0) {
-            return 0.0;
-        }
+        if (maxVoltage == 0.0) return 0.0;
         return analogInput.getVoltage() / maxVoltage;
     }
 

@@ -16,16 +16,14 @@ public class EnhancedCRServo implements CRServo, PwmControl {
 
     public EnhancedCRServo(CRServoImplEx crServo) {
         this.crServo = crServo;
-        cache.referenceVoltage = 13.5;
     }
 
     public EnhancedCRServo(HardwareMap hardwareMap, String name) {
         this.crServo = hardwareMap.get(CRServoImplEx.class, name);
-        cache.referenceVoltage = 13.5;
     }
 
     public EnhancedCRServo withCachingTolerance(double tolerance) {
-        cache.tolerance = tolerance;
+        setCachingTolerance(tolerance);
         return this;
     }
 
