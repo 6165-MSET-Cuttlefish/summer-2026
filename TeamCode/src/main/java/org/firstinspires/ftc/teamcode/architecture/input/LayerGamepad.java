@@ -1,4 +1,4 @@
-package org.firstinspires.ftc.teamcode.architecture.input.suppliers;
+package org.firstinspires.ftc.teamcode.architecture.input;
 
 import com.qualcomm.robotcore.hardware.Gamepad;
 
@@ -8,33 +8,31 @@ import java.util.function.BooleanSupplier;
 import java.util.function.DoubleSupplier;
 
 /**
- * Wraps the SDK's {@link Gamepad} with a per-control {@link EnhancedBooleanSupplier} /
- * {@link EnhancedDoubleSupplier}. While {@link #atRest} is true, every supplier reads as
- * neutral (false / 0.0) so a layered system can have inactive layers physically present
- * but logically silent.
+ * SDK {@link Gamepad} wrapped with per-control edge/cached suppliers. While {@link #atRest}
+ * is true, every supplier reads neutral so inactive layers are physically present but silent.
  */
-public final class CustomGamepad {
+public final class LayerGamepad {
     private final Gamepad gamepad;
     private boolean atRest = false;
 
-    private final List<EnhancedBooleanSupplier> boolSuppliers = new ArrayList<>();
-    private final List<EnhancedDoubleSupplier> doubleSuppliers = new ArrayList<>();
+    private final List<EdgeBooleanSupplier> boolSuppliers = new ArrayList<>();
+    private final List<CachedDoubleSupplier> doubleSuppliers = new ArrayList<>();
 
-    public final EnhancedDoubleSupplier leftStickX, leftStickY;
-    public final EnhancedDoubleSupplier rightStickX, rightStickY;
-    public final EnhancedDoubleSupplier leftTrigger, rightTrigger;
+    public final CachedDoubleSupplier leftStickX, leftStickY;
+    public final CachedDoubleSupplier rightStickX, rightStickY;
+    public final CachedDoubleSupplier leftTrigger, rightTrigger;
 
-    public final EnhancedBooleanSupplier a, b, x, y;
-    public final EnhancedBooleanSupplier dpadUp, dpadDown, dpadLeft, dpadRight;
-    public final EnhancedBooleanSupplier leftBumper, rightBumper;
-    public final EnhancedBooleanSupplier leftStickButton, rightStickButton;
-    public final EnhancedBooleanSupplier guide, start, back;
+    public final EdgeBooleanSupplier a, b, x, y;
+    public final EdgeBooleanSupplier dpadUp, dpadDown, dpadLeft, dpadRight;
+    public final EdgeBooleanSupplier leftBumper, rightBumper;
+    public final EdgeBooleanSupplier leftStickButton, rightStickButton;
+    public final EdgeBooleanSupplier guide, start, back;
 
-    public final EnhancedBooleanSupplier touchpad, touchpadFinger1, touchpadFinger2;
-    public final EnhancedDoubleSupplier touchpadFinger1X, touchpadFinger1Y;
-    public final EnhancedDoubleSupplier touchpadFinger2X, touchpadFinger2Y;
+    public final EdgeBooleanSupplier touchpad, touchpadFinger1, touchpadFinger2;
+    public final CachedDoubleSupplier touchpadFinger1X, touchpadFinger1Y;
+    public final CachedDoubleSupplier touchpadFinger2X, touchpadFinger2Y;
 
-    public CustomGamepad(Gamepad gamepad) {
+    public LayerGamepad(Gamepad gamepad) {
         this.gamepad = gamepad;
 
         leftStickX  = doubleSupplier(() -> atRest ? 0.0 : gamepad.left_stick_x);
@@ -73,14 +71,14 @@ public final class CustomGamepad {
         touchpadFinger2Y = doubleSupplier(() -> atRest ? 0.0 : gamepad.touchpad_finger_2_y);
     }
 
-    private EnhancedBooleanSupplier boolSupplier(BooleanSupplier source) {
-        EnhancedBooleanSupplier s = new EnhancedBooleanSupplier(source);
+    private EdgeBooleanSupplier boolSupplier(BooleanSupplier source) {
+        EdgeBooleanSupplier s = new EdgeBooleanSupplier(source);
         boolSuppliers.add(s);
         return s;
     }
 
-    private EnhancedDoubleSupplier doubleSupplier(DoubleSupplier source) {
-        EnhancedDoubleSupplier s = new EnhancedDoubleSupplier(source);
+    private CachedDoubleSupplier doubleSupplier(DoubleSupplier source) {
+        CachedDoubleSupplier s = new CachedDoubleSupplier(source);
         doubleSuppliers.add(s);
         return s;
     }
@@ -88,8 +86,7 @@ public final class CustomGamepad {
     public void setAtRest(boolean atRest) {
         boolean wasAtRest = this.atRest;
         this.atRest = atRest;
-        // Rest→active transition: prime suppliers to "this is the new baseline" so a button
-        // already held at the time of activation doesn't fire wasJustPressed.
+        // On rest→active: prime so a button held at activation doesn't fire wasJustPressed.
         if (wasAtRest && !atRest) primeAllSuppliers();
     }
 
@@ -107,7 +104,7 @@ public final class CustomGamepad {
         for (int i = 0; i < doubleSuppliers.size(); i++) doubleSuppliers.get(i).primeToCurrentState();
     }
 
-    /** Escape hatch to the underlying SDK gamepad — useful for fields not wrapped here. */
+    /** Escape hatch for SDK fields not wrapped here. */
     public Gamepad getRawGamepad() {
         return gamepad;
     }

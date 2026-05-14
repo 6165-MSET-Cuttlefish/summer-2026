@@ -6,13 +6,11 @@ import com.qualcomm.robotcore.hardware.HardwareDevice;
 import java.util.Objects;
 
 /**
- * Wraps an analog absolute encoder. Two different reads:
+ * Analog absolute encoder. Two reads:
  * <ul>
- *   <li>{@link #getAbsoluteAngle()} — single-turn, 0–360°, post-offset/inversion. Always
- *       reflects the current physical shaft angle.</li>
- *   <li>{@link #getRelativePosition()} — accumulated multi-turn rotation since the first call,
- *       multiplied by {@code gearRatio}. The first call snapshots the current shaft as the
- *       zero reference.</li>
+ *   <li>{@link #getAbsoluteAngle()} — single-turn, 0–360°, post-offset/inversion.</li>
+ *   <li>{@link #getRelativePosition()} — multi-turn accumulated rotation × {@code gearRatio};
+ *       the first call snapshots the current shaft as zero.</li>
  * </ul>
  */
 public class AbsoluteAnalogEncoder implements HardwareDevice {
@@ -38,7 +36,7 @@ public class AbsoluteAnalogEncoder implements HardwareDevice {
         this.inverted = inverted;
     }
 
-    /** Multi-turn accumulated rotation in degrees × gearRatio, zeroed at first call. */
+    /** Multi-turn rotation in degrees × gearRatio, zeroed at first call. */
     public double getRelativePosition() {
         double rawAngle = getAbsoluteAngle();
 
@@ -59,13 +57,14 @@ public class AbsoluteAnalogEncoder implements HardwareDevice {
         return position * gearRatio;
     }
 
-    /** Re-snapshot the current shaft angle as the new zero reference. */
+    /** Reset the zero reference to the current shaft angle. */
     public void zero() {
         position = 0.0;
+        delta = 0.0;
         initialized = false;
     }
 
-    /** Single-turn shaft angle, 0–360°, after applying offset and inversion. */
+    /** Single-turn shaft angle in [0, 360°), post-offset/inversion. */
     public double getAbsoluteAngle() {
         double encoderPosition = getVoltageAsAngle();
 
@@ -87,7 +86,7 @@ public class AbsoluteAnalogEncoder implements HardwareDevice {
         return (voltage / maxVoltage) * 360.0;
     }
 
-    /** Last shaft delta (degrees) seen by {@link #getRelativePosition()}. */
+    /** Last shaft delta in degrees from {@link #getRelativePosition()}. */
     public double getDelta() {
         return delta;
     }

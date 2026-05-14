@@ -6,10 +6,7 @@ import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.qualcomm.robotcore.hardware.PwmControl;
 import com.qualcomm.robotcore.hardware.ServoController;
 
-/**
- * CRServo wrapper with power caching, bounds, and voltage compensation. Same shape as
- * {@link EnhancedMotor}.
- */
+/** CRServo wrapper with the same power-caching + voltage-comp shape as {@link EnhancedMotor}. */
 public class EnhancedCRServo implements CRServo, PwmControl {
     private final CRServoImplEx crServo;
     private final WriteCache cache = new WriteCache();
@@ -40,7 +37,7 @@ public class EnhancedCRServo implements CRServo, PwmControl {
     }
 
     public static void updateVoltage(double voltage) {
-        HardwareVoltage.update(voltage);
+        BatteryVoltage.update(voltage);
     }
 
     @Override

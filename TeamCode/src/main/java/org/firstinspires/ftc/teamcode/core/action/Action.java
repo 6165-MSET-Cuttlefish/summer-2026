@@ -6,10 +6,8 @@ import java.util.Set;
 import org.firstinspires.ftc.teamcode.core.Module;
 
 /**
- * A composable action: a sequence of steps that the {@link Actions} scheduler ticks
- * cooperatively on the OpMode thread. No background threads; no hardware-write races.
- *
- * <p>Use {@link ActionBuilder} (or the factories on {@link Actions}) to construct one.
+ * Composable action: a sequence of steps the {@link Actions} scheduler ticks cooperatively
+ * on the OpMode thread. Construct via {@link ActionBuilder} or {@link Actions} factories.
  */
 public final class Action {
 
@@ -29,9 +27,9 @@ public final class Action {
         this.name = name;
     }
 
-    /** Schedule on {@link Actions}. Conflicting actions (same target module) are cancelled. */
-    public void run() {
-        Actions.run(this);
+    /** Schedule; conflicting actions (shared target module) are cancelled. Returns immediately. */
+    public void schedule() {
+        Actions.schedule(this);
     }
 
     public void cancel() {
@@ -81,13 +79,15 @@ public final class Action {
     }
 
     /**
-     * Advance one scheduler tick. Returns true when the action is done or cancelled. Instant
-     * steps chain within a single tick — yields only when a step returns false from {@link Step#tick}.
+     * Advance one scheduler tick. Instant steps chain within a single tick — only yield when a
+     * step returns false from {@link Step#tick}.
      */
     boolean tick() {
         if (done || cancelled) return true;
 
         while (true) {
+            // A step's start/tick may have indirectly cancelled us (e.g. via scheduled conflict).
+            if (done || cancelled) return true;
             if (completedEarly) {
                 done = true;
                 return true;
@@ -106,6 +106,7 @@ public final class Action {
                     step.start(this);
                 } catch (Exception e) {
                     logStepFailure(currentStepIndex, e);
+                    try { step.cancel(this); } catch (Exception ignored) {}
                     cancelled = true;
                     return true;
                 }
@@ -116,6 +117,7 @@ public final class Action {
                 stepDone = step.tick(this);
             } catch (Exception e) {
                 logStepFailure(currentStepIndex, e);
+                try { step.cancel(this); } catch (Exception ignored) {}
                 cancelled = true;
                 return true;
             }
@@ -151,7 +153,7 @@ public final class Action {
     public Action then(Action other) { return Actions.sequence(this, other); }
     public Action with(Action other) { return Actions.parallel(this, other); }
     public Action timeout(long ms) { return Actions.timeout(this, ms); }
-    public Action named(String newName) { return new Action(steps, targets, newName); }
+    public Action withName(String newName) { return new Action(steps, targets, newName); }
 
     @Override
     public String toString() {
@@ -159,10 +161,8 @@ public final class Action {
     }
 
     /**
-     * A single unit of work in an Action. Subclasses hold their own cross-tick state (timers,
-     * indices, child actions). {@link #start} runs once when the step first activates;
-     * {@link #tick} is polled until it returns true; {@link #cancel} runs when the parent
-     * action is cancelled mid-step.
+     * One unit of work. {@link #start} runs once on activation, {@link #tick} is polled until
+     * true, {@link #cancel} fires if the parent action is cancelled mid-step.
      */
     public abstract static class Step {
         protected void start(Action parent) {}

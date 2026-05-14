@@ -1,4 +1,4 @@
-package org.firstinspires.ftc.teamcode.architecture.diagnostics;
+package org.firstinspires.ftc.teamcode.architecture.telemetry;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -28,15 +28,14 @@ public final class LoopProfiler {
     }
 
     /**
-     * Reentrant scope timer. Hold the returned token until {@link #endScope(String, long)};
-     * scopes nest, interleave, and survive the start/mark cursor. Returns 0 when the profiler
-     * is disabled — endScope detects that and skips.
+     * Reentrant scope timer. Returns 0 when disabled. <b>Tokens are single-use</b> — re-leaving
+     * with the same token double-counts the elapsed time.
      */
-    public long startScope() {
+    public long enterSection() {
         return enabled ? System.nanoTime() : 0L;
     }
 
-    public void endScope(String section, long startTokenNs) {
+    public void leaveSection(String section, long startTokenNs) {
         if (!enabled || startTokenNs == 0L) return;
         accumulate(section, (System.nanoTime() - startTokenNs) / 1_000_000.0);
     }

@@ -1,4 +1,4 @@
-package org.firstinspires.ftc.teamcode.architecture.auto.pathaction;
+package org.firstinspires.ftc.teamcode.architecture.auto.scheduler;
 
 import com.pedropathing.geometry.Pose;
 import com.pedropathing.paths.HeadingInterpolator;
@@ -7,20 +7,16 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Builds piecewise heading interpolators on top of {@link HeadingInterpolator#piecewise}. Tracks
- * the running t-value so chained segments don't have to repeat their start-t.
+ * Builds piecewise {@link HeadingInterpolator}s, tracking the running t so chained segments
+ * don't have to repeat their start-t.
  *
- * <p>Example:
  * <pre>{@code
  * new HeadingInterpolatorBuilder()
- *     .linear(0, .2, startHeading, midHeading)  // explicit (startT, endT)
- *     .constant(.6, midHeading)                  // auto-chained: startT = .2
- *     .linear(1, midHeading, endHeading)         // auto-chained: startT = .6
+ *     .linear(0, .2, startHeading, midHeading)
+ *     .constant(.6, midHeading)
+ *     .linear(1, midHeading, endHeading)
  *     .build();
  * }</pre>
- *
- * @author Maxwell Tham — 6165 MSET Cuttlefish
- * @author Eric Woo-Shem — 6165 MSET Cuttlefish
  */
 public class HeadingInterpolatorBuilder {
     private final List<HeadingInterpolator.PiecewiseNode> nodes = new ArrayList<>();
@@ -99,6 +95,23 @@ public class HeadingInterpolatorBuilder {
     public HeadingInterpolator build() {
         if (nodes.isEmpty()) {
             throw new IllegalStateException("HeadingInterpolatorBuilder: no segments added");
+        }
+        // Pedro accepts overlapping/backwards ranges silently. Reject those here so misuse of
+        // the auto-chained overloads doesn't produce a confusing interpolator.
+        for (int i = 0; i < nodes.size(); i++) {
+            HeadingInterpolator.PiecewiseNode n = nodes.get(i);
+            if (n.getFinalTValue() <= n.getInitialTValue()) {
+                throw new IllegalStateException(
+                        "HeadingInterpolatorBuilder: segment " + i + " has endT ("
+                                + n.getFinalTValue() + ") <= startT (" + n.getInitialTValue() + ")");
+            }
+            if (i > 0 && n.getInitialTValue() < nodes.get(i - 1).getFinalTValue()) {
+                throw new IllegalStateException(
+                        "HeadingInterpolatorBuilder: segment " + i + " starts at "
+                                + n.getInitialTValue() + " before previous segment ends at "
+                                + nodes.get(i - 1).getFinalTValue()
+                                + " — add segments in ascending t order");
+            }
         }
         return HeadingInterpolator.piecewise(nodes.toArray(new HeadingInterpolator.PiecewiseNode[0]));
     }

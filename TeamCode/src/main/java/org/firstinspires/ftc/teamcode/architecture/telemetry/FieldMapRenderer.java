@@ -1,11 +1,11 @@
 package org.firstinspires.ftc.teamcode.architecture.telemetry;
 
 /**
- * Renders a 2D pixel grid as Unicode Braille (U+2800..U+28FF) in HTML so the Driver Station can
- * show a tiny field map. Each Braille glyph packs 2×4 pixels. {@link #snapshot()} /
- * {@link #restore()} lets callers draw a static field once and cheaply reset before each frame.
+ * Renders a 2D pixel grid as Unicode Braille (U+2800..U+28FF, 2×4 pixels per glyph) in HTML
+ * for the Driver Station field map. {@link #snapshot()}/{@link #restore()} let callers draw
+ * a static background once and cheaply reset before each frame.
  */
-public class BrailleRenderer {
+public class FieldMapRenderer {
 
     private int width;
     private int height;
@@ -16,7 +16,7 @@ public class BrailleRenderer {
     private double scaleX;
     private double scaleY;
 
-    public BrailleRenderer(int width, int height) {
+    public FieldMapRenderer(int width, int height) {
         setSize(width, height);
     }
 
@@ -27,9 +27,12 @@ public class BrailleRenderer {
         this.scaleY = height / 144.0;
         this.pixels = new boolean[height][width];
         this.cellColors = new String[(height + 3) / 4][(width + 1) / 2];
+        // Snapshot was sized to the old dimensions; void it so restore() can't mismatch bounds.
+        this.snapshotPixels = null;
+        this.snapshotColors = null;
     }
 
-    /** Generic field background — border plus 6×6 tile grid. Game-side subclasses can layer on. */
+    /** Generic background: border + 6×6 tile grid. Game subclasses layer on top. */
     public void drawFieldLayout() {
         clear();
 
@@ -41,7 +44,7 @@ public class BrailleRenderer {
 
         int tiles = 6;
         for (int i = 1; i < tiles; i++) {
-            int x = snapX((int) ((i / (double) tiles) * w));
+            int x = alignXToGlyph((int) ((i / (double) tiles) * w));
             int y = (int) ((i / (double) tiles) * h);
             drawLine(x, 0, x, h, grid);
             drawLine(0, y, w, y, grid);
@@ -87,6 +90,7 @@ public class BrailleRenderer {
     }
 
     public void restore() {
+        if (snapshotPixels == null) return;
         for (int y = 0; y < height; y++)
             System.arraycopy(snapshotPixels[y], 0, pixels[y], 0, width);
         for (int y = 0; y < cellColors.length; y++)
@@ -228,7 +232,7 @@ public class BrailleRenderer {
     }
 
     /** Snap x to an even pixel so it aligns with the 2-wide Braille glyph boundary. */
-    private static int snapX(int x) {
+    private static int alignXToGlyph(int x) {
         return (x / 2) * 2;
     }
 

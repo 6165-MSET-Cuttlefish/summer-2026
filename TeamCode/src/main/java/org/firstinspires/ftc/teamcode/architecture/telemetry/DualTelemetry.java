@@ -5,13 +5,13 @@ import org.firstinspires.ftc.robotcore.external.Func;
 import org.firstinspires.ftc.robotcore.external.Telemetry;
 
 import static org.firstinspires.ftc.teamcode.architecture.telemetry.HtmlFormatter.*;
-import static org.firstinspires.ftc.teamcode.architecture.diagnostics.OptimizationToggles.telemetryLazyFormat;
+import static org.firstinspires.ftc.teamcode.architecture.OptimizationToggles.telemetryLazyFormat;
 
 /**
  * Fan-out telemetry: every call goes to the Driver Station (HTML-formatted) and FTC Dashboard
  * (plain text). Disable either backend with the static enable flags.
  */
-public class EnhancedTelemetry implements Telemetry {
+public class DualTelemetry implements Telemetry {
     public static boolean enableDSTelemetry = true;
     public static boolean enableDashboardTelemetry = true;
 
@@ -20,7 +20,7 @@ public class EnhancedTelemetry implements Telemetry {
     private int defaultFontSize = FONT_NORMAL;
     private static final Item EMPTY_ITEM = new EnhancedItem(null, null);
 
-    public EnhancedTelemetry(Telemetry dsTelemetry, Telemetry dashTelemetry) {
+    public DualTelemetry(Telemetry dsTelemetry, Telemetry dashTelemetry) {
         this.dsTelemetry = dsTelemetry;
         this.dashTelemetry = dashTelemetry;
         if (enableDSTelemetry) dsTelemetry.setDisplayFormat(DisplayFormat.HTML);
@@ -34,11 +34,11 @@ public class EnhancedTelemetry implements Telemetry {
     public int getDefaultFontSize() { return defaultFontSize; }
 
     private String fmtCaption(String caption) {
-        return htmlSize(defaultFontSize, htmlBold(caption));
+        return htmlSize(defaultFontSize, htmlBold(htmlEscape(caption)));
     }
 
     private String fmtValue(Object value) {
-        return htmlColorSize(COLOR_VALUE, defaultFontSize, String.valueOf(value));
+        return htmlColorSize(COLOR_VALUE, defaultFontSize, htmlEscape(String.valueOf(value)));
     }
 
     public void addGroupHeader(String groupName) {
@@ -46,7 +46,7 @@ public class EnhancedTelemetry implements Telemetry {
     }
 
     public void addGroupHeader(String groupName, String color) {
-        if (enableDSTelemetry) dsTelemetry.addLine(htmlBold(htmlColorSize(color, FONT_LARGE, groupName)));
+        if (enableDSTelemetry) dsTelemetry.addLine(htmlBold(htmlColorSize(color, FONT_LARGE, htmlEscape(groupName))));
         if (enableDashboardTelemetry) dashTelemetry.addLine("-------- " + groupName + " --------");
     }
 
@@ -55,7 +55,7 @@ public class EnhancedTelemetry implements Telemetry {
     }
 
     public void addSubgroupHeader(String subgroupName, String color) {
-        if (enableDSTelemetry) dsTelemetry.addLine(htmlBold(htmlColorSize(color, FONT_NORMAL, "▸ " + subgroupName)));
+        if (enableDSTelemetry) dsTelemetry.addLine(htmlBold(htmlColorSize(color, FONT_NORMAL, "▸ " + htmlEscape(subgroupName))));
         if (enableDashboardTelemetry) dashTelemetry.addLine("  » " + subgroupName);
     }
 
@@ -67,8 +67,8 @@ public class EnhancedTelemetry implements Telemetry {
     public void addModuleHeader(String moduleName, String stateString) {
         if (enableDSTelemetry) {
             dsTelemetry.addData(
-                    htmlColor(COLOR_MODULE, htmlBold(moduleName)),
-                    htmlColor(COLOR_STATE, stateString));
+                    htmlColor(COLOR_MODULE, htmlBold(htmlEscape(moduleName))),
+                    htmlColor(COLOR_STATE, htmlEscape(stateString)));
         }
         if (enableDashboardTelemetry) dashTelemetry.addData(moduleName, stateString);
     }
@@ -76,38 +76,38 @@ public class EnhancedTelemetry implements Telemetry {
     public Item addDSLargeData(String caption, Object value) {
         if (!enableDSTelemetry) return EMPTY_ITEM;
         Item it = dsTelemetry.addData(
-                htmlSize(FONT_SMALL, htmlBold(caption)),
-                htmlColorSize(COLOR_VALUE, FONT_XLARGE, String.valueOf(value)));
+                htmlSize(FONT_SMALL, htmlBold(htmlEscape(caption))),
+                htmlColorSize(COLOR_VALUE, FONT_XLARGE, htmlEscape(String.valueOf(value))));
         return new EnhancedItem(it, null);
     }
 
-    public EnhancedTelemetry addDSData(String caption, Object value) {
+    public DualTelemetry addDSData(String caption, Object value) {
         if (enableDSTelemetry) dsTelemetry.addData(fmtCaption(caption), fmtValue(value));
         return this;
     }
 
-    public EnhancedTelemetry addDSData(String caption, String format, Object... args) {
+    public DualTelemetry addDSData(String caption, String format, Object... args) {
         if (enableDSTelemetry) dsTelemetry.addData(fmtCaption(caption), fmtValue(String.format(format, args)));
         return this;
     }
 
-    public EnhancedTelemetry addDSLine(String value) {
+    public DualTelemetry addDSLine(String value) {
         if (enableDSTelemetry) dsTelemetry.addLine(value);
         return this;
     }
 
-    public EnhancedTelemetry addDSRawHtml(String caption, String htmlValue) {
+    public DualTelemetry addDSRawHtml(String caption, String htmlValue) {
         if (enableDSTelemetry) dsTelemetry.addData(fmtCaption(caption), htmlValue);
         return this;
     }
 
-    public EnhancedTelemetry addDashboardData(String caption, Object value) {
+    public DualTelemetry addDashboardData(String caption, Object value) {
         if (enableDashboardTelemetry) dashTelemetry.addData(caption, value);
         return this;
     }
 
-    public EnhancedTelemetry addDashboardData(String caption, String format, Object... args) {
-        // Dashboard's addData(caption, format, args) formats lazily, so we forward verbatim.
+    public DualTelemetry addDashboardData(String caption, String format, Object... args) {
+        // Dashboard formats lazily, so forward without pre-formatting.
         if (enableDashboardTelemetry) dashTelemetry.addData(caption, format, args);
         return this;
     }
@@ -166,9 +166,16 @@ public class EnhancedTelemetry implements Telemetry {
 
     @Override
     public boolean removeItem(Item item) {
-        boolean ds = enableDSTelemetry && dsTelemetry.removeItem(item);
-        boolean dash = enableDashboardTelemetry && dashTelemetry.removeItem(item);
-        return ds | dash;
+        Item dsItem = item;
+        Item dashItem = item;
+        if (item instanceof EnhancedItem) {
+            EnhancedItem wrapper = (EnhancedItem) item;
+            dsItem = wrapper.ds;
+            dashItem = wrapper.dash;
+        }
+        boolean ds = enableDSTelemetry && dsItem != null && dsTelemetry.removeItem(dsItem);
+        boolean dash = enableDashboardTelemetry && dashItem != null && dashTelemetry.removeItem(dashItem);
+        return ds || dash;
     }
 
     @Override
@@ -211,9 +218,11 @@ public class EnhancedTelemetry implements Telemetry {
 
     @Override
     public boolean update() {
-        boolean ds = !enableDSTelemetry || dsTelemetry.update();
-        boolean dash = !enableDashboardTelemetry || dashTelemetry.update();
-        return ds & dash;
+        // Telemetry contract: true if transmitted. Fan-out → "any backend transmitted".
+        if (!enableDSTelemetry && !enableDashboardTelemetry) return true;
+        boolean ds = enableDSTelemetry && dsTelemetry.update();
+        boolean dash = enableDashboardTelemetry && dashTelemetry.update();
+        return ds || dash;
     }
 
     @Override
@@ -232,9 +241,16 @@ public class EnhancedTelemetry implements Telemetry {
 
     @Override
     public boolean removeLine(Line line) {
-        boolean ds = enableDSTelemetry && dsTelemetry.removeLine(line);
-        boolean dash = enableDashboardTelemetry && dashTelemetry.removeLine(line);
-        return ds | dash;
+        Line dsLine = line;
+        Line dashLine = line;
+        if (line instanceof EnhancedLine) {
+            EnhancedLine wrapper = (EnhancedLine) line;
+            dsLine = wrapper.ds;
+            dashLine = wrapper.dash;
+        }
+        boolean ds = enableDSTelemetry && dsLine != null && dsTelemetry.removeLine(dsLine);
+        boolean dash = enableDashboardTelemetry && dashLine != null && dashTelemetry.removeLine(dashLine);
+        return ds || dash;
     }
 
     @Override

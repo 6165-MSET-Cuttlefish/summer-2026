@@ -1,4 +1,4 @@
-package org.firstinspires.ftc.teamcode.architecture.auto.pathaction;
+package org.firstinspires.ftc.teamcode.architecture.auto.scheduler;
 
 import com.pedropathing.geometry.Pose;
 import com.pedropathing.paths.PathChain;
@@ -9,14 +9,11 @@ import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.function.Supplier;
 import org.firstinspires.ftc.teamcode.core.action.Action;
-import org.firstinspires.ftc.teamcode.core.state.State;
+import org.firstinspires.ftc.teamcode.core.State;
 
 public class PathActionSegment {
 
-    /**
-     * Bundle returned by a deferred-path resolver so the scheduler can
-     * launch during-actions produced by the body along with the path.
-     */
+    /** Bundle returned by a deferred-path resolver; carries path + during-actions together. */
     public static final class Resolved {
         public final PathChain path;
         public final List<Action> duringActions;

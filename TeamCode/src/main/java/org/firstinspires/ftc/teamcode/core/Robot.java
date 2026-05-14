@@ -13,50 +13,46 @@ import org.firstinspires.ftc.robotcore.external.navigation.Pose2D;
 import org.firstinspires.ftc.teamcode.architecture.auto.FieldConfig;
 import org.firstinspires.ftc.teamcode.architecture.auto.PedroSetup;
 import org.firstinspires.ftc.teamcode.architecture.auto.RobotHardwareConfig;
-import org.firstinspires.ftc.teamcode.architecture.auto.pathaction.PathActionScheduler;
-import org.firstinspires.ftc.teamcode.architecture.diagnostics.OptimizationToggles;
-import org.firstinspires.ftc.teamcode.architecture.telemetry.EnhancedTelemetry;
+import org.firstinspires.ftc.teamcode.architecture.auto.scheduler.PathActionScheduler;
+import org.firstinspires.ftc.teamcode.architecture.OptimizationToggles;
+import org.firstinspires.ftc.teamcode.architecture.telemetry.DualTelemetry;
 
-/**
- * Game-agnostic robot base. Holds the framework-level state (telemetry, follower, scheduler,
- * shared target poses) and exposes hooks for the game subclass to wire up its mechanisms.
- */
+/** Game-agnostic robot base. Game subclasses wire up mechanisms in {@link #initializeGameModules()}. */
 @Config
 public abstract class Robot {
     public static Robot robot;
 
-    public final EnhancedTelemetry telemetry;
+    public final DualTelemetry telemetry;
     public final EnhancedOpMode opMode;
     public Follower follower;
     public PathActionScheduler pathActionScheduler;
     public TelemetryPacket packet;
 
-    public Pose targetPose;
-    public Pose targetApriltagPose;
-    public Pose cornerPose;
+    public static TelemetryToggles telemetryToggles = new TelemetryToggles();
 
-    public static FrameworkTelemetry telemetryToggles = new FrameworkTelemetry();
-
-    protected Robot(EnhancedOpMode opMode, boolean preservePosition, boolean initSRSHub)
+    protected Robot(EnhancedOpMode opMode, boolean preservePosition)
             throws InterruptedException {
         this.opMode = opMode;
 
         Robot previousRobot = robot;
-        telemetry = new EnhancedTelemetry(opMode.telemetry, FtcDashboard.getInstance().getTelemetry());
+        telemetry = new DualTelemetry(opMode.telemetry, FtcDashboard.getInstance().getTelemetry());
         telemetry.setMsTransmissionInterval(100);
 
-        setTargetPosesForAlliance();
-
+        // Available to module ctors below. If anything throws, wipe so the next init is fresh.
         robot = this;
-
-        pathActionScheduler = new PathActionScheduler();
-        initializeFollower(preservePosition, previousRobot);
-        initializeGameModules();
+        try {
+            pathActionScheduler = new PathActionScheduler();
+            initializeFollower(preservePosition, previousRobot);
+            initializeGameModules();
+        } catch (Throwable t) {
+            robot = null;
+            throw t;
+        }
     }
 
     private void initializeFollower(boolean preservePosition, Robot previousRobot) {
         if (preservePosition && previousRobot != null && previousRobot.follower != null) {
-            // Read live Pinpoint pose so a hot-reload / opmode swap doesn't snap us back to start.
+            // Use live Pinpoint pose so a hot-reload / opmode swap doesn't snap back to start.
             GoBildaPinpointDriver pinpoint = opMode.hardwareMap.get(
                     GoBildaPinpointDriver.class, RobotHardwareConfig.PINPOINT_NAME);
             pinpoint.update();
@@ -75,13 +71,10 @@ public abstract class Robot {
     }
 
     protected abstract void initializeGameModules();
-    protected abstract void setTargetPosesForAlliance();
-    public abstract void updateWriteToggles();
 
-    public static class FrameworkTelemetry {
+    public static class TelemetryToggles {
         public boolean dsTelemetry = true;
         public boolean dashboardTelemetry = true;
-        public boolean dsDebug = false;
         public boolean voltage = true;
         public boolean current = false;
         public boolean loopProfile = OptimizationToggles.loopProfileTelemetryByDefault;

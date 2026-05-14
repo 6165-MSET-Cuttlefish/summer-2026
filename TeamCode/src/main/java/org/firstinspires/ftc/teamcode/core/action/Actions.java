@@ -6,12 +6,11 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
 import org.firstinspires.ftc.teamcode.core.Module;
-import org.firstinspires.ftc.teamcode.core.state.State;
+import org.firstinspires.ftc.teamcode.core.State;
 
 /**
- * Single-threaded cooperative scheduler. Holds the active action list and pumps every action
- * once when {@link #update} is called. EnhancedOpMode calls update() each loop between
- * primaryLoop() and writeModules(). All step code runs on the OpMode thread.
+ * Single-threaded cooperative scheduler; {@link #update} ticks every active action once.
+ * EnhancedOpMode pumps between gameLoop() and writeModules() on the OpMode thread.
  */
 public final class Actions {
     private Actions() {}
@@ -52,58 +51,58 @@ public final class Actions {
     public static Action sequence(Action... actions) {
         ActionBuilder b = new ActionBuilder();
         for (Action a : actions) b.action(a);
-        return b.named("Sequence").build();
+        return b.withName("Sequence").build();
     }
 
     public static Action parallel(Action... actions) {
-        return new ActionBuilder().parallel(actions).named("Parallel").build();
+        return new ActionBuilder().parallel(actions).withName("Parallel").build();
     }
 
     public static Action race(Action... actions) {
-        return new ActionBuilder().race(actions).named("Race").build();
+        return new ActionBuilder().race(actions).withName("Race").build();
     }
 
     public static Action timeout(Action action, long ms) {
-        return new ActionBuilder().timeout(action, ms).named("Timeout").build();
+        return new ActionBuilder().timeout(action, ms).withName("Timeout").build();
     }
 
     public static Action repeat(Action action, int times) {
-        return new ActionBuilder().repeat(action, times).named("Repeat").build();
+        return new ActionBuilder().repeat(action, times).withName("Repeat").build();
     }
 
     public static Action loop(Action action, BooleanSupplier condition) {
-        return new ActionBuilder().loop(action, condition).named("Loop").build();
+        return new ActionBuilder().loop(action, condition).withName("Loop").build();
     }
 
     public static Action ifThen(BooleanSupplier condition, Action ifTrue) {
-        return new ActionBuilder().ifThen(condition, ifTrue).named("IfThen").build();
+        return new ActionBuilder().ifThen(condition, ifTrue).withName("IfThen").build();
     }
 
     public static Action ifElse(BooleanSupplier condition, Action ifTrue, Action ifFalse) {
-        return new ActionBuilder().ifElse(condition, ifTrue, ifFalse).named("IfElse").build();
+        return new ActionBuilder().ifElse(condition, ifTrue, ifFalse).withName("IfElse").build();
     }
 
     public static Action retry(Action action, int maxAttempts, BooleanSupplier success) {
-        return new ActionBuilder().retry(action, maxAttempts, success).named("Retry").build();
+        return new ActionBuilder().retry(action, maxAttempts, success).withName("Retry").build();
     }
 
     public static Action retry(Action action, int maxAttempts, long delayMs, BooleanSupplier success) {
-        return new ActionBuilder().retry(action, maxAttempts, delayMs, success).named("Retry").build();
+        return new ActionBuilder().retry(action, maxAttempts, delayMs, success).withName("Retry").build();
     }
 
     public static Action retry(Runnable code, int maxAttempts, BooleanSupplier success) {
-        return new ActionBuilder().retry(code, maxAttempts, success).named("Retry").build();
+        return new ActionBuilder().retry(code, maxAttempts, success).withName("Retry").build();
     }
 
     public static Action retry(Runnable code, int maxAttempts, long delayMs, BooleanSupplier success) {
-        return new ActionBuilder().retry(code, maxAttempts, delayMs, success).named("Retry").build();
+        return new ActionBuilder().retry(code, maxAttempts, delayMs, success).withName("Retry").build();
     }
 
     public static ActionBuilder builder() {
         return new ActionBuilder();
     }
 
-    static void run(Action action) {
+    static void schedule(Action action) {
         int i = 0;
         while (i < active.size()) {
             Action a = active.get(i);
@@ -114,7 +113,7 @@ public final class Actions {
                 i++;
             }
         }
-        // Drop a stale entry for the same action (re-schedule case).
+        // Re-schedule case: drop any stale entry for this action.
         active.remove(action);
         action.reset();
         active.add(action);
@@ -127,13 +126,15 @@ public final class Actions {
         return false;
     }
 
-    /** Tick every active action once. Called by EnhancedOpMode each loop. */
     public static void update() {
         int i = 0;
         while (i < active.size()) {
             Action a = active.get(i);
             if (a.tick()) {
-                active.remove(i);
+                // Tick may have already removed us (self-conflicting schedule from within tick).
+                if (i < active.size() && active.get(i) == a) {
+                    active.remove(i);
+                }
             } else {
                 i++;
             }
@@ -141,8 +142,10 @@ public final class Actions {
     }
 
     public static void cancelAll() {
-        for (Action a : active) a.cancel();
+        // Snapshot + clear first so a schedule from a cancel callback lands in an empty list.
+        Action[] snapshot = active.toArray(new Action[0]);
         active.clear();
+        for (Action a : snapshot) a.cancel();
     }
 
     public static void cancelFor(Module... modules) {
@@ -185,7 +188,6 @@ public final class Actions {
         return active.contains(action);
     }
 
-    /** Alias for {@link #cancelAll}; kept so OpMode.stop() lifecycle callers don't change. */
     public static void shutdown() {
         cancelAll();
     }

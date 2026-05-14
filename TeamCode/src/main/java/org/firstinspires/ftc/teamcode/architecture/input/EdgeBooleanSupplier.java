@@ -1,8 +1,8 @@
-package org.firstinspires.ftc.teamcode.architecture.input.suppliers;
+package org.firstinspires.ftc.teamcode.architecture.input;
 
 import java.util.function.BooleanSupplier;
 
-public class EnhancedBooleanSupplier {
+public class EdgeBooleanSupplier {
     private final BooleanSupplier booleanSupplier;
     private final long risingDebounce;
     private final long fallingDebounce;
@@ -16,10 +16,10 @@ public class EnhancedBooleanSupplier {
 
     private long lastRisingEdgeTime = 0L;
     private boolean doubleClickDetected = false;
-    private static final long DOUBLE_CLICK_WINDOW = 300_000_000L;
-    private long doubleClickWindow = DOUBLE_CLICK_WINDOW;
+    private static final long DOUBLE_CLICK_TIMEOUT_NS = 300_000_000L;
+    private long doubleClickTimeoutNs = DOUBLE_CLICK_TIMEOUT_NS;
 
-    public EnhancedBooleanSupplier(
+    public EdgeBooleanSupplier(
             BooleanSupplier booleanSupplier, double risingDebounce, double fallingDebounce) {
         this.booleanSupplier = booleanSupplier;
         this.risingDebounce = (long) (risingDebounce * 1E9);
@@ -30,7 +30,7 @@ public class EnhancedBooleanSupplier {
         this.toggleFalse = current;
     }
 
-    public EnhancedBooleanSupplier(BooleanSupplier booleanSupplier) {
+    public EdgeBooleanSupplier(BooleanSupplier booleanSupplier) {
         this(booleanSupplier, 0.0, 0.0);
     }
 
@@ -38,7 +38,7 @@ public class EnhancedBooleanSupplier {
         previous = current;
         long time = System.nanoTime();
         doubleClickDetected = false;
-        // Read the source once — supplier may be a chained predicate that's not free to call twice.
+        // Source may be a chained predicate; sample once.
         boolean raw = booleanSupplier.getAsBoolean();
 
         if (!current && raw) {
@@ -46,7 +46,7 @@ public class EnhancedBooleanSupplier {
                 current = true;
                 toggleTrue = !toggleTrue;
 
-                if (time - lastRisingEdgeTime <= doubleClickWindow) {
+                if (time - lastRisingEdgeTime <= doubleClickTimeoutNs) {
                     doubleClickDetected = true;
                 }
                 lastRisingEdgeTime = time;
@@ -65,8 +65,7 @@ public class EnhancedBooleanSupplier {
     }
 
     public void invalidate() {
-        // Invalidate is called once per loop by the input system; update immediately
-        // so edge state advances even if this supplier is not queried this frame.
+        // Update immediately so edge state advances even if this supplier isn't queried this frame.
         update();
         valid = true;
     }
@@ -79,88 +78,98 @@ public class EnhancedBooleanSupplier {
         toggleFalse = state;
         valid = true;
         doubleClickDetected = false;
+        // Drop the prior rising-edge timestamp so presses across a prime gap (e.g. layer switch)
+        // don't register as a double-click.
+        lastRisingEdgeTime = 0L;
         timeMarker = System.nanoTime();
     }
 
-    public boolean getState() {
+    private void ensureFresh() {
         if (!valid) {
             update();
             valid = true;
         }
+    }
+
+    public boolean getValue() {
+        ensureFresh();
         return current;
     }
 
     public boolean wasJustPressed() {
-        return getState() && !previous;
+        ensureFresh();
+        return current && !previous;
     }
 
     public boolean wasJustReleased() {
-        return !getState() && previous;
+        ensureFresh();
+        return !current && previous;
     }
 
     public boolean isDown() {
-        return getState();
+        ensureFresh();
+        return current;
     }
 
     public boolean isToggledOn() {
-        getState();
+        ensureFresh();
         return toggleTrue;
     }
 
     public boolean getDoubleClick() {
-        getState();
+        ensureFresh();
         return doubleClickDetected;
     }
 
-    public EnhancedBooleanSupplier setDoubleClickWindow(double windowSeconds) {
-        this.doubleClickWindow = (long) (windowSeconds * 1E9);
+    public EdgeBooleanSupplier setDoubleClickTimeout(double timeoutSeconds) {
+        this.doubleClickTimeoutNs = (long) (timeoutSeconds * 1E9);
         return this;
     }
 
-    public EnhancedBooleanSupplier debounce(double debounce) {
-        return new EnhancedBooleanSupplier(this.booleanSupplier, debounce, debounce);
+    public EdgeBooleanSupplier debounce(double debounce) {
+        return new EdgeBooleanSupplier(this.booleanSupplier, debounce, debounce);
     }
 
-    public EnhancedBooleanSupplier debounce(double rising, double falling) {
-        return new EnhancedBooleanSupplier(this.booleanSupplier, rising, falling);
+    public EdgeBooleanSupplier debounce(double rising, double falling) {
+        return new EdgeBooleanSupplier(this.booleanSupplier, rising, falling);
     }
 
-    public EnhancedBooleanSupplier debounceRisingEdge(double debounce) {
-        return new EnhancedBooleanSupplier(
+    public EdgeBooleanSupplier debounceRisingEdge(double debounce) {
+        return new EdgeBooleanSupplier(
                 this.booleanSupplier, debounce, this.fallingDebounce / 1E9);
     }
 
-    public EnhancedBooleanSupplier debounceFallingEdge(double debounce) {
-        return new EnhancedBooleanSupplier(
+    public EdgeBooleanSupplier debounceFallingEdge(double debounce) {
+        return new EdgeBooleanSupplier(
                 this.booleanSupplier, this.risingDebounce / 1E9, debounce);
     }
 
-    public EnhancedBooleanSupplier and(BooleanSupplier other) {
-        return new EnhancedBooleanSupplier(() -> this.getState() && other.getAsBoolean());
+    public EdgeBooleanSupplier and(BooleanSupplier other) {
+        return new EdgeBooleanSupplier(() -> this.getValue() && other.getAsBoolean());
     }
 
-    public EnhancedBooleanSupplier and(EnhancedBooleanSupplier other) {
-        return new EnhancedBooleanSupplier(() -> this.getState() && other.getState());
+    public EdgeBooleanSupplier and(EdgeBooleanSupplier other) {
+        return new EdgeBooleanSupplier(() -> this.getValue() && other.getValue());
     }
 
-    public EnhancedBooleanSupplier or(BooleanSupplier other) {
-        return new EnhancedBooleanSupplier(() -> this.getState() || other.getAsBoolean());
+    public EdgeBooleanSupplier or(BooleanSupplier other) {
+        return new EdgeBooleanSupplier(() -> this.getValue() || other.getAsBoolean());
     }
 
-    public EnhancedBooleanSupplier or(EnhancedBooleanSupplier other) {
-        return new EnhancedBooleanSupplier(() -> this.getState() || other.getState());
+    public EdgeBooleanSupplier or(EdgeBooleanSupplier other) {
+        return new EdgeBooleanSupplier(() -> this.getValue() || other.getValue());
     }
 
-    public EnhancedBooleanSupplier xor(BooleanSupplier other) {
-        return new EnhancedBooleanSupplier(() -> this.getState() ^ other.getAsBoolean());
+    public EdgeBooleanSupplier xor(BooleanSupplier other) {
+        return new EdgeBooleanSupplier(() -> this.getValue() ^ other.getAsBoolean());
     }
 
-    public EnhancedBooleanSupplier xor(EnhancedBooleanSupplier other) {
-        return new EnhancedBooleanSupplier(() -> this.getState() ^ other.getState());
+    public EdgeBooleanSupplier xor(EdgeBooleanSupplier other) {
+        return new EdgeBooleanSupplier(() -> this.getValue() ^ other.getValue());
     }
 
-    public EnhancedBooleanSupplier not() {
-        return new EnhancedBooleanSupplier(
-                () -> !this.getState(), fallingDebounce / 1E9, risingDebounce / 1E9);
+    public EdgeBooleanSupplier not() {
+        return new EdgeBooleanSupplier(
+                () -> !this.getValue(), fallingDebounce / 1E9, risingDebounce / 1E9);
     }
 }

@@ -1,13 +1,13 @@
-package org.firstinspires.ftc.teamcode.architecture.input.suppliers;
+package org.firstinspires.ftc.teamcode.architecture.input;
 
 import java.util.function.DoubleSupplier;
 
-public class EnhancedDoubleSupplier {
+public class CachedDoubleSupplier {
     private final DoubleSupplier doubleSupplier;
     private boolean valid = false;
     private double current;
 
-    public EnhancedDoubleSupplier(DoubleSupplier doubleSupplier) {
+    public CachedDoubleSupplier(DoubleSupplier doubleSupplier) {
         this.doubleSupplier = doubleSupplier;
         this.current = doubleSupplier.getAsDouble();
     }
@@ -21,7 +21,7 @@ public class EnhancedDoubleSupplier {
         valid = true;
     }
 
-    public double getState() {
+    public double getValue() {
         if (!valid) {
             current = doubleSupplier.getAsDouble();
             valid = true;
@@ -33,37 +33,37 @@ public class EnhancedDoubleSupplier {
         return new ConditionalBinder(this);
     }
 
-    public EnhancedBooleanSupplier greaterThan(double threshold) {
-        return new EnhancedBooleanSupplier(() -> this.getState() > threshold);
+    public EdgeBooleanSupplier greaterThan(double threshold) {
+        return new EdgeBooleanSupplier(() -> this.getValue() > threshold);
     }
 
-    public EnhancedBooleanSupplier lessThan(double threshold) {
-        return new EnhancedBooleanSupplier(() -> this.getState() < threshold);
+    public EdgeBooleanSupplier lessThan(double threshold) {
+        return new EdgeBooleanSupplier(() -> this.getValue() < threshold);
     }
 
-    public EnhancedBooleanSupplier greaterThanOrEqual(double threshold) {
-        return new EnhancedBooleanSupplier(() -> this.getState() >= threshold);
+    public EdgeBooleanSupplier greaterThanOrEqual(double threshold) {
+        return new EdgeBooleanSupplier(() -> this.getValue() >= threshold);
     }
 
-    public EnhancedBooleanSupplier lessThanOrEqual(double threshold) {
-        return new EnhancedBooleanSupplier(() -> this.getState() <= threshold);
+    public EdgeBooleanSupplier lessThanOrEqual(double threshold) {
+        return new EdgeBooleanSupplier(() -> this.getValue() <= threshold);
     }
 
-    public EnhancedBooleanSupplier inRange(double min, double max) {
-        return new EnhancedBooleanSupplier(() -> {
-            double value = this.getState();
+    public EdgeBooleanSupplier inRange(double min, double max) {
+        return new EdgeBooleanSupplier(() -> {
+            double value = this.getValue();
             return value >= min && value <= max;
         });
     }
 
     public static class ConditionalBinder {
-        private final EnhancedDoubleSupplier supplier;
+        private final CachedDoubleSupplier supplier;
         private double minValue = Double.NEGATIVE_INFINITY;
         private double maxValue = Double.POSITIVE_INFINITY;
         private boolean minInclusive = false;
         private boolean maxInclusive = false;
 
-        public ConditionalBinder(EnhancedDoubleSupplier supplier) {
+        public ConditionalBinder(CachedDoubleSupplier supplier) {
             this.supplier = supplier;
         }
 
@@ -91,9 +91,9 @@ public class EnhancedDoubleSupplier {
             return this;
         }
 
-        public EnhancedBooleanSupplier bind() {
-            return new EnhancedBooleanSupplier(() -> {
-                double value = supplier.getState();
+        public EdgeBooleanSupplier bind() {
+            return new EdgeBooleanSupplier(() -> {
+                double value = supplier.getValue();
                 boolean minCheck = minInclusive ? value >= minValue : value > minValue;
                 boolean maxCheck = maxInclusive ? value <= maxValue : value < maxValue;
                 return minCheck && maxCheck;

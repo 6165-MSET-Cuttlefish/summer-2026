@@ -12,31 +12,33 @@ import com.pedropathing.paths.PathConstraints;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 
 /**
- * Pedro Pathing tuning + the {@link #createFollower(HardwareMap)} factory. <strong>Edit this
- * file when retuning</strong> path-following constants. Wire-it-up names + physical offsets
- * live in {@link RobotHardwareConfig}.
+ * Pedro Pathing tuning + the {@link #createFollower(HardwareMap)} factory. <strong>Edit when
+ * retuning path-following.</strong> Hardware names + offsets live in {@link RobotHardwareConfig}.
  *
- * <p>All public statics are non-final so they show up as live-tunable on FTC Dashboard.
+ * <p>Public statics are non-final so they appear as live-tunable on FTC Dashboard.
  */
 @Config
 public final class PedroSetup {
     private PedroSetup() {}
 
-    // ── Follower / control loop tuning ─────────────────────────────────────
-
+    // Pedro 2.1.2 defaults. Predictive braking is enabled (predictiveBrakingCoefficients(...)
+    // flips usePredictiveBraking=true), so translational/drive PIDF and zero-power-accel
+    // constants are NOT consulted — the predictive controller drives both inner loops.
     public static FollowerConstants followerConstants =
             new FollowerConstants()
-                    // Pre-season placeholders — retune for the summer test robot.
-                    .headingPIDFCoefficients(new PIDFCoefficients(0.5, 0, 0.05, 0.03))
+                    .headingPIDFCoefficients(new PIDFCoefficients(1, 0, 0, 0.01))
+                    .mass(10.65)
                     .predictiveBrakingCoefficients(
-                            new PredictiveBrakingCoefficients(0.14, 0.1973407216665132, 0.001005159209640557))
-                    .centripetalScaling(0.0);
+                            new PredictiveBrakingCoefficients(0.15, 0.1, 0.001))
+                    .centripetalScaling(0.0005);
 
-    // ── Drivetrain hookup (names/dirs come from RobotHardwareConfig) ───────
-
+    // xVelocity/yVelocity are Pedro defaults; measure forward + strafe full-power free-run
+    // speed (in/s) on the real robot for path-following accuracy.
     public static MecanumConstants driveConstants =
             new MecanumConstants()
                     .maxPower(1.0)
+                    .xVelocity(81.34056)
+                    .yVelocity(65.43028)
                     .leftFrontMotorName(RobotHardwareConfig.LEFT_FRONT_MOTOR)
                     .leftRearMotorName(RobotHardwareConfig.LEFT_REAR_MOTOR)
                     .rightFrontMotorName(RobotHardwareConfig.RIGHT_FRONT_MOTOR)
@@ -46,8 +48,8 @@ public final class PedroSetup {
                     .rightFrontMotorDirection(RobotHardwareConfig.RIGHT_FRONT_DIR)
                     .rightRearMotorDirection(RobotHardwareConfig.RIGHT_REAR_DIR)
                     .motorCachingThreshold(0.01)
-                    .useVoltageCompensation(true)
-                    .nominalVoltage(11.5);
+                    .useVoltageCompensation(false)
+                    .nominalVoltage(12.0);
 
     public static PinpointConstants localizerConstants =
             new PinpointConstants()
@@ -59,12 +61,7 @@ public final class PedroSetup {
                     .forwardEncoderDirection(RobotHardwareConfig.PINPOINT_FORWARD_DIR)
                     .strafeEncoderDirection(RobotHardwareConfig.PINPOINT_STRAFE_DIR);
 
-    // ── Path constraints ───────────────────────────────────────────────────
-    // Pedro 2.x defaults are (tValue=0.995, velocity=0.1, translational=0.1, heading=0.007,
-    // timeout=100ms, brakingStrength=1, bezierSearchLimit=10, brakingStart=1). Start with
-    // those and tune per-path via IntegratedPathBuilder.setConstraints(...) where needed.
-    // .copy() so a downstream FollowerBuilder.pathConstraints(...) call doesn't replace the
-    // shared static and silently change the values we read here.
+    // .copy() so downstream FollowerBuilder.pathConstraints(...) can't mutate the shared default.
     public static PathConstraints pathConstraints = PathConstraints.defaultConstraints.copy();
 
     public static Follower createFollower(HardwareMap hardwareMap) {

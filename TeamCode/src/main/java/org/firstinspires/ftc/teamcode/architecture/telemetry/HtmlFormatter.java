@@ -1,9 +1,6 @@
 package org.firstinspires.ftc.teamcode.architecture.telemetry;
 
-/**
- * HTML wrapping helpers for Driver Station telemetry. Static-imported into telemetry call sites
- * so callers don't sprinkle raw tags through their code.
- */
+/** HTML wrapping helpers for Driver Station telemetry. Static-imported at call sites. */
 public final class HtmlFormatter {
     private HtmlFormatter() {}
 
@@ -16,10 +13,7 @@ public final class HtmlFormatter {
     public static final String COLOR_BLUE   = "#448aff";
     public static final String COLOR_GRAY   = "#9e9e9e";
 
-    // Number of <big>/<small> wraps applied by htmlSize. FONT_MINI_FIELD and FONT_FIELD are
-    // mutable so opmode-side code can pick a different size.
-    public static int FONT_MINI_FIELD = -1;
-    public static int FONT_FIELD = -1;
+    // Count of <big>/<small> wraps htmlSize applies. Positive = bigger, negative = smaller.
     public static final int FONT_SMALL   = -1;
     public static final int FONT_NORMAL  = 0;
     public static final int FONT_LARGE   = 1;
@@ -28,6 +22,30 @@ public final class HtmlFormatter {
 
     public static String htmlBold(String text) {
         return "<b>" + text + "</b>";
+    }
+
+    /**
+     * Escape HTML-meaningful characters in a leaf string. The {@code html*()} primitives don't
+     * escape — callers must escape user-supplied content. Returns input unchanged if clean.
+     */
+    public static String htmlEscape(String text) {
+        if (text == null) return "";
+        if (text.indexOf('&') < 0 && text.indexOf('<') < 0
+                && text.indexOf('>') < 0 && text.indexOf('"') < 0) {
+            return text;
+        }
+        StringBuilder out = new StringBuilder(text.length() + 8);
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            switch (c) {
+                case '&': out.append("&amp;"); break;
+                case '<': out.append("&lt;"); break;
+                case '>': out.append("&gt;"); break;
+                case '"': out.append("&quot;"); break;
+                default: out.append(c);
+            }
+        }
+        return out.toString();
     }
 
     public static String htmlColor(String hex, String text) {

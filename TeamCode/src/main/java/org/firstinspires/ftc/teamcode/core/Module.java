@@ -10,14 +10,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.DoubleSupplier;
 import org.firstinspires.ftc.robotcore.external.Telemetry;
-import org.firstinspires.ftc.teamcode.architecture.telemetry.EnhancedTelemetry;
+import org.firstinspires.ftc.teamcode.architecture.telemetry.DualTelemetry;
 import org.firstinspires.ftc.teamcode.core.action.Action;
-import org.firstinspires.ftc.teamcode.core.state.State;
+import org.firstinspires.ftc.teamcode.core.State;
 
-/**
- * Base class for robot subsystem modules. Subclasses implement {@link #initStates()},
- * {@link #read()}, and {@link #write()}.
- */
+/** Base class for robot subsystem modules. */
 public abstract class Module {
     private static final int DEFAULT_HISTORY_SIZE = 50;
     private int maxHistorySize = DEFAULT_HISTORY_SIZE;
@@ -36,22 +33,24 @@ public abstract class Module {
     private boolean telemetryEnabled = true;
     private boolean writeEnabled = true;
     private String name;
-    private String readScopeKey;
-    private String writeScopeKey;
+    private String readSectionName;
+    private String writeSectionName;
 
     public Module() {
         this.name = getClass().getSimpleName();
-        recomputeScopeKeys();
-        initStates();
+        recomputeSectionNames();
+        // initStates() runs from EnhancedOpMode.initModules() after the subclass ctor returns,
+        // so state→module bindings aren't yet in place during the subclass ctor — use init()
+        // or initStates() for code that references registered states.
     }
 
-    private void recomputeScopeKeys() {
-        this.readScopeKey = "read." + this.name;
-        this.writeScopeKey = "write." + this.name;
+    private void recomputeSectionNames() {
+        this.readSectionName = "read." + this.name;
+        this.writeSectionName = "write." + this.name;
     }
 
-    public final String getReadScopeKey() { return readScopeKey; }
-    public final String getWriteScopeKey() { return writeScopeKey; }
+    public final String getReadSectionName() { return readSectionName; }
+    public final String getWriteSectionName() { return writeSectionName; }
 
     protected abstract void initStates();
     protected abstract void read();
@@ -59,22 +58,16 @@ public abstract class Module {
 
     public void init() {}
 
-    /**
-     * Called once when the OpMode stops. Override to put hardware in a safe state (zero motors,
-     * disable PIDs, retract lifts). Runs after Actions and the path scheduler are cancelled, so
-     * nothing else will be writing the same hardware concurrently.
-     */
+    /** Override to put hardware in a safe state on OpMode stop. */
     public void stop() {}
 
     protected void onStateChange() {}
     protected void onTelemetry() {}
 
     /**
-     * Wire a State's setpoint to a live source — typically a field on a {@code @Config static}
-     * tuning class. The framework re-applies {@code state.setValue(supplier.getAsDouble())} once
-     * per loop before {@link #read()}, so dashboard edits land before the next read uses the value.
-     *
-     * <p>Call after {@link #setStates(State...)} in {@link #initStates()}.
+     * Wire a State's setpoint to a live source (typically a {@code @Config static} field). The
+     * framework refreshes via {@code state.setValue(supplier.getAsDouble())} once per loop
+     * before {@link #read()}. Call after {@link #setStates(State...)} in {@link #initStates()}.
      */
     protected final void bindTunable(State state, DoubleSupplier supplier) {
         Runnable refresh = () -> state.setValue(supplier.getAsDouble());
@@ -82,7 +75,6 @@ public abstract class Module {
         tunableRefreshers.add(refresh);
     }
 
-    /** Framework hook: called by EnhancedOpMode before each read(). Pulls bound tunables. */
     final void refreshTunables() {
         for (int i = 0; i < tunableRefreshers.size(); i++) {
             tunableRefreshers.get(i).run();
@@ -93,8 +85,8 @@ public abstract class Module {
     public int telemetryOrder() { return 0; }
 
     /**
-     * Register the initial state for each state-class this module owns. For enum states, every
-     * variant is bound to this module and reset to its initial value so a re-run starts clean.
+     * Register the initial state for each state-class. For enums, every variant is bound to
+     * this module and reset to its initial value so a re-run starts clean.
      */
     protected final void setStates(State... initialStates) {
         states.clear();
@@ -105,8 +97,8 @@ public abstract class Module {
             stateMap.put(s.getClass(), s);
 
             if (s instanceof Enum<?>) {
-                // getDeclaringClass handles enum constants with bodies (otherwise anonymous
-                // subclasses, getEnumConstants() returns null on those).
+                // getDeclaringClass handles enum constants with bodies (anonymous subclasses
+                // whose own getEnumConstants() returns null).
                 Class<?> enumClass = ((Enum<?>) s).getDeclaringClass();
                 Object[] constants = enumClass.getEnumConstants();
                 if (constants != null) {
@@ -120,12 +112,9 @@ public abstract class Module {
         }
     }
 
-    /**
-     * Current state of the given class. Map lookup is O(1); the list-scan fallback preserves
-     * isInstance() semantics for subclass-keyed lookups.
-     */
+    /** O(1) map lookup, with a list-scan fallback to preserve isInstance() semantics. */
     @SuppressWarnings("unchecked")
-    public final <T extends State> T get(Class<T> stateClass) {
+    public final <T extends State> T getState(Class<T> stateClass) {
         State s = stateMap.get(stateClass);
         if (s != null) return (T) s;
         for (int i = 0; i < states.size(); i++) {
@@ -136,10 +125,10 @@ public abstract class Module {
     }
 
     /**
-     * Transition to {@code newState}. True on success or no-op (already in that state); false
-     * when the state class isn't registered or a guard rejected the transition.
+     * Transition to {@code newState}. True on success/no-op; false when the state class isn't
+     * registered or a guard rejected the transition.
      */
-    public final boolean set(State newState) {
+    public final boolean setState(State newState) {
         for (int i = 0; i < states.size(); i++) {
             State current = states.get(i);
             if (newState.getClass() != current.getClass()) continue;
@@ -164,16 +153,16 @@ public abstract class Module {
         return false;
     }
 
-    public final boolean isIn(State... checkStates) {
+    public final boolean isInAny(State... checkStates) {
         for (State check : checkStates) {
-            if (get(check.getClass()).equals(check)) return true;
+            if (getState(check.getClass()).equals(check)) return true;
         }
         return false;
     }
 
     public final boolean isInAll(State... checkStates) {
         for (State check : checkStates) {
-            if (!get(check.getClass()).equals(check)) return false;
+            if (!getState(check.getClass()).equals(check)) return false;
         }
         return true;
     }
@@ -208,8 +197,13 @@ public abstract class Module {
 
     @SuppressWarnings("unchecked")
     private <T extends State> boolean checkGuards(State from, State to) {
+        // Enum constants with method bodies return an anonymous subclass from getClass();
+        // getDeclaringClass() returns the declared type that callers actually register.
+        Class<?> fromKey = (from instanceof Enum<?>)
+                ? ((Enum<?>) from).getDeclaringClass()
+                : from.getClass();
         for (TransitionGuard<?> g : guards) {
-            if (g.stateClass == from.getClass()) {
+            if (g.stateClass == fromKey) {
                 TransitionGuard<T> typedGuard = (TransitionGuard<T>) g;
                 if (!typedGuard.check.test((T) from, (T) to)) return false;
             }
@@ -245,7 +239,7 @@ public abstract class Module {
     protected void telemetry() {
         if (!telemetryEnabled || telemetry == null) return;
 
-        EnhancedTelemetry et = getEnhancedTelemetry();
+        DualTelemetry et = getDualTelemetry();
         if (et != null) {
             et.addDashboardData(name, getStateString());
         } else {
@@ -254,9 +248,9 @@ public abstract class Module {
         onTelemetry();
     }
 
-    public final Module named(String name) {
+    public final Module withName(String name) {
         this.name = name;
-        recomputeScopeKeys();
+        recomputeSectionNames();
         return this;
     }
 
@@ -267,34 +261,33 @@ public abstract class Module {
     public final void setWriteEnabled(boolean enabled) { this.writeEnabled = enabled; }
     public final boolean isWriteEnabled() { return writeEnabled; }
 
-    /** Action to schedule from {@link EnhancedOpMode#start()}. Null to skip. */
     public final void setDefaultAction(Action action) { this.defaultAction = action; }
     public final Action getDefaultAction() { return defaultAction; }
 
-    protected final EnhancedTelemetry getEnhancedTelemetry() {
-        return telemetry instanceof EnhancedTelemetry ? (EnhancedTelemetry) telemetry : null;
+    protected final DualTelemetry getDualTelemetry() {
+        return telemetry instanceof DualTelemetry ? (DualTelemetry) telemetry : null;
     }
 
     protected final void logDS(String caption, Object value) {
-        EnhancedTelemetry et = getEnhancedTelemetry();
+        DualTelemetry et = getDualTelemetry();
         if (et != null) et.addDSData(name + " " + caption, value);
         else log(caption, value);
     }
 
     protected final void logDS(String caption, String format, Object... args) {
-        EnhancedTelemetry et = getEnhancedTelemetry();
+        DualTelemetry et = getDualTelemetry();
         if (et != null) et.addDSData(name + " " + caption, format, args);
         else log(caption, format, args);
     }
 
     protected final void logDashboard(String caption, Object value) {
-        EnhancedTelemetry et = getEnhancedTelemetry();
+        DualTelemetry et = getDualTelemetry();
         if (et != null) et.addDashboardData(name + " " + caption, value);
         else log(caption, value);
     }
 
     protected final void logDashboard(String caption, String format, Object... args) {
-        EnhancedTelemetry et = getEnhancedTelemetry();
+        DualTelemetry et = getDualTelemetry();
         if (et != null) et.addDashboardData(name + " " + caption, format, args);
         else log(caption, format, args);
     }

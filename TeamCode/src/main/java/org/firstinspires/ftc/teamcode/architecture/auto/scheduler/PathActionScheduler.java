@@ -1,4 +1,4 @@
-package org.firstinspires.ftc.teamcode.architecture.auto.pathaction;
+package org.firstinspires.ftc.teamcode.architecture.auto.scheduler;
 
 import android.os.SystemClock;
 import com.pedropathing.follower.Follower;
@@ -13,7 +13,7 @@ import java.util.function.LongSupplier;
 import org.firstinspires.ftc.teamcode.core.action.Action;
 import org.firstinspires.ftc.teamcode.core.action.Actions;
 import org.firstinspires.ftc.teamcode.core.Robot;
-import org.firstinspires.ftc.teamcode.core.state.State;
+import org.firstinspires.ftc.teamcode.core.State;
 
 /**
  * Drives a list of {@link PathActionSegment}s through a small state machine. Each {@link #update()}
@@ -28,7 +28,7 @@ public class PathActionScheduler {
     private final List<PathActionSegment> segments = new ArrayList<>();
     private int currentIndex = 0;
     private SchedulerState currentState = SchedulerState.IDLE;
-    private long segmentStartTime = 0L;
+    private long segmentStartTimeMs = 0L;
 
     private List<Action> pendingActions = new ArrayList<>();
     private List<Action> activeDuringActions = new ArrayList<>();
@@ -42,7 +42,7 @@ public class PathActionScheduler {
     }
 
     public PathActionScheduler(Follower follower, LongSupplier clock) {
-        // null follower = late-bind to Robot.robot.follower at use time.
+        // null follower → late-bind to Robot.robot.follower at use time.
         this.follower = follower;
         this.clock = clock != null ? clock : SystemClock::elapsedRealtime;
     }
@@ -86,7 +86,9 @@ public class PathActionScheduler {
     public void reset() {
         currentIndex = 0;
         currentState = SchedulerState.IDLE;
-        segmentStartTime = 0L;
+        segmentStartTimeMs = 0L;
+        // Re-arm so a fired override doesn't permanently disable the scheduler; keep the config.
+        overrideTriggered = false;
         cancelAsyncOperations();
     }
 
@@ -127,11 +129,10 @@ public class PathActionScheduler {
         PathActionSegment segment = getCurrentSegment();
         if (segment == null) return;
 
-        // Honor after-actions on timeout — autos that "drive then shoot" should still shoot
-        // when the drive doesn't finish in time.
+        // Honor after-actions on timeout so "drive then shoot" still shoots if the drive runs long.
         if (currentState != SchedulerState.IDLE && hasTimedOut(segment)) {
             if (currentState == SchedulerState.PATH_RUNNING) stopCurrentPath();
-            if (kickOffAfterActions(segment)) return;
+            if (tryStartAfterActions(segment)) return;
             advanceToNextSegment();
             return;
         }
@@ -163,9 +164,8 @@ public class PathActionScheduler {
             return;
         }
         if (shouldHoldAtDistance(segment)) {
-            // Advance the scheduler without touching the follower — Pedro finishes the path
-            // and engages its end-hold on its own, so subsequent segments overlap that final
-            // convergence and the next followPath() hands off cleanly.
+            // Advance without touching the follower — Pedro finishes + engages end-hold on its
+            // own, so subsequent segments overlap the final convergence and hand off cleanly.
             executeAfterActions(segment);
             return;
         }
@@ -179,7 +179,7 @@ public class PathActionScheduler {
                 .append(" | ").append(currentState).append(" | ");
         if (seg == null) return sb.append("0/0ms | P:false D:0 A:0").toString();
 
-        long elapsed = segmentStartTime == 0 ? 0 : now() - segmentStartTime;
+        long elapsed = segmentStartTimeMs == 0 ? 0 : now() - segmentStartTimeMs;
         Integer timeout = seg.getTimeoutMs();
         Integer pathTimeout = seg.getPathTimeoutMs();
         sb.append(elapsed).append('/').append(timeout == null ? "inf" : timeout).append("ms");
@@ -193,11 +193,11 @@ public class PathActionScheduler {
     }
 
     private void initializeSegment(PathActionSegment segment) {
-        segmentStartTime = now();
+        segmentStartTimeMs = now();
         cancelAsyncOperations();
 
         List<State> states = segment.getModuleStates();
-        for (int i = 0; i < states.size(); i++) states.get(i).apply();
+        for (int i = 0; i < states.size(); i++) states.get(i).activate();
         List<Runnable> prelude = segment.getPreludeRunnables();
         for (int i = 0; i < prelude.size(); i++) prelude.get(i).run();
 
@@ -231,13 +231,12 @@ public class PathActionScheduler {
             }
             currentState = SchedulerState.PATH_RUNNING;
             follower().followPath(chain, holdEnd);
-            for (int i = 0; i < during.size(); i++) during.get(i).run();
+            for (int i = 0; i < during.size(); i++) during.get(i).schedule();
             activeDuringActions = new ArrayList<>(during);
         } else if (!segment.getDuringActions().isEmpty()) {
-            // Pure fire-and-forget segment (no path). Don't track them so segment advance
-            // doesn't cancel.
+            // No path — don't track these so advancing past the segment doesn't cancel them.
             List<Action> during = segment.getDuringActions();
-            for (int i = 0; i < during.size(); i++) during.get(i).run();
+            for (int i = 0; i < during.size(); i++) during.get(i).schedule();
             executeAfterActions(segment);
         } else {
             executeAfterActions(segment);
@@ -251,7 +250,7 @@ public class PathActionScheduler {
             return;
         }
         currentState = SchedulerState.AFTER_ACTION;
-        for (int i = 0; i < after.size(); i++) after.get(i).run();
+        for (int i = 0; i < after.size(); i++) after.get(i).schedule();
         pendingActions = new ArrayList<>(after);
     }
 
@@ -265,7 +264,7 @@ public class PathActionScheduler {
         cancelAsyncOperations();
         currentIndex++;
         currentState = SchedulerState.IDLE;
-        segmentStartTime = 0L;
+        segmentStartTimeMs = 0L;
     }
 
     private void cancelAsyncOperations() {
@@ -289,20 +288,16 @@ public class PathActionScheduler {
         else follower().breakFollowing();
     }
 
-    /**
-     * Skip the current segment but still fire its after-actions. Use when the segment hit an
-     * external abort condition (driver intervention, override) where the path should stop but
-     * cleanup work needs to run.
-     */
+    /** Skip the current segment but still fire its after-actions (cleanup still runs). */
     public void skipCurrentSegment() {
         PathActionSegment segment = getCurrentSegment();
         if (segment == null) return;
         if (currentState == SchedulerState.PATH_RUNNING) stopCurrentPath();
-        if (kickOffAfterActions(segment)) return;
+        if (tryStartAfterActions(segment)) return;
         advanceToNextSegment();
     }
 
-    private boolean kickOffAfterActions(PathActionSegment segment) {
+    private boolean tryStartAfterActions(PathActionSegment segment) {
         if (currentState == SchedulerState.AFTER_ACTION
                 || currentState == SchedulerState.WAITING
                 || currentState == SchedulerState.COMPLETED) {
@@ -325,20 +320,19 @@ public class PathActionScheduler {
         if (timeout == null) return false;
         Callable<Boolean> cond = segment.getTimeoutCondition();
         if (cond != null && !evaluateCondition(cond)) return false;
-        return now() - segmentStartTime > timeout;
+        return now() - segmentStartTimeMs > timeout;
     }
 
     private boolean hasPathTimedOut(PathActionSegment segment) {
         Integer pathTimeout = segment.getPathTimeoutMs();
         if (pathTimeout == null) return false;
-        return now() - segmentStartTime > pathTimeout;
+        return now() - segmentStartTimeMs > pathTimeout;
     }
 
     private boolean canContinue(PathActionSegment segment) {
         List<Callable<Boolean>> conditions = segment.getContinueConditions();
         if (conditions.isEmpty()) {
             boolean hasTimeout = segment.getTimeoutMs() != null && segment.getTimeoutMs() > -1;
-            // No timeout + no conditions = continue immediately.
             return !hasTimeout;
         }
         return combine(conditions, segment.getContinueMode());

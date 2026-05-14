@@ -3,30 +3,25 @@ package org.firstinspires.ftc.teamcode.architecture.input;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleSupplier;
 import java.util.function.Function;
-import org.firstinspires.ftc.teamcode.architecture.input.suppliers.CustomGamepad;
-import org.firstinspires.ftc.teamcode.architecture.input.suppliers.EnhancedBooleanSupplier;
-import org.firstinspires.ftc.teamcode.architecture.input.suppliers.EnhancedDoubleSupplier;
 
 /**
- * A gamepad façade that delegates to whichever {@link CustomGamepad} is currently active in
- * the underlying {@link LayerStack}. Each accessor returns a stable supplier whose value is
- * sourced from the active layer; if no layer is active or a layer switch is in progress,
- * suppliers return neutral (false / 0.0).
+ * Gamepad façade that delegates to the active {@link LayerGamepad} on a {@link LayerStack}.
+ * Suppliers return neutral when no layer is active or a layer switch is in progress.
  */
 public class LayeredGamepad<T> {
     private final LayerStack<T> layerStack;
     private boolean suppressInputsUntilNextInvalidate = false;
 
-    private final EnhancedDoubleSupplier leftStickX, leftStickY;
-    private final EnhancedDoubleSupplier rightStickX, rightStickY;
-    private final EnhancedDoubleSupplier leftTrigger, rightTrigger;
-    private final EnhancedBooleanSupplier a, b, x, y;
-    private final EnhancedBooleanSupplier dpadUp, dpadDown, dpadLeft, dpadRight;
-    private final EnhancedBooleanSupplier leftBumper, rightBumper;
-    private final EnhancedBooleanSupplier start, back, guide;
-    private final EnhancedBooleanSupplier leftStickButton, rightStickButton;
-    private final EnhancedBooleanSupplier touchpad;
-    private final EnhancedDoubleSupplier touchpadFinger1X, touchpadFinger1Y;
+    private final CachedDoubleSupplier leftStickX, leftStickY;
+    private final CachedDoubleSupplier rightStickX, rightStickY;
+    private final CachedDoubleSupplier leftTrigger, rightTrigger;
+    private final EdgeBooleanSupplier a, b, x, y;
+    private final EdgeBooleanSupplier dpadUp, dpadDown, dpadLeft, dpadRight;
+    private final EdgeBooleanSupplier leftBumper, rightBumper;
+    private final EdgeBooleanSupplier start, back, guide;
+    private final EdgeBooleanSupplier leftStickButton, rightStickButton;
+    private final EdgeBooleanSupplier touchpad;
+    private final CachedDoubleSupplier touchpadFinger1X, touchpadFinger1Y;
 
     public LayeredGamepad(LayerStack<T> layerStack) {
         if (layerStack == null) throw new IllegalArgumentException("layerStack cannot be null");
@@ -64,25 +59,25 @@ public class LayeredGamepad<T> {
         touchpadFinger1Y = mappedDouble(cg -> cg.touchpadFinger1Y);
     }
 
-    private EnhancedBooleanSupplier mappedBool(Function<CustomGamepad, EnhancedBooleanSupplier> getter) {
+    private EdgeBooleanSupplier mappedBool(Function<LayerGamepad, EdgeBooleanSupplier> getter) {
         BooleanSupplier source = () -> {
-            CustomGamepad active = getActiveGamepad();
-            return active != null && getter.apply(active).getState();
+            LayerGamepad active = getActiveGamepad();
+            return active != null && getter.apply(active).getValue();
         };
-        return new EnhancedBooleanSupplier(source);
+        return new EdgeBooleanSupplier(source);
     }
 
-    private EnhancedDoubleSupplier mappedDouble(Function<CustomGamepad, EnhancedDoubleSupplier> getter) {
+    private CachedDoubleSupplier mappedDouble(Function<LayerGamepad, CachedDoubleSupplier> getter) {
         DoubleSupplier source = () -> {
-            CustomGamepad active = getActiveGamepad();
-            return active != null ? getter.apply(active).getState() : 0.0;
+            LayerGamepad active = getActiveGamepad();
+            return active != null ? getter.apply(active).getValue() : 0.0;
         };
-        return new EnhancedDoubleSupplier(source);
+        return new CachedDoubleSupplier(source);
     }
 
     public LayerStack<T> getLayerStack() { return layerStack; }
 
-    public CustomGamepad getActiveGamepad() {
+    public LayerGamepad getActiveGamepad() {
         if (suppressInputsUntilNextInvalidate) return null;
         return layerStack.getGamepad();
     }
@@ -94,13 +89,13 @@ public class LayeredGamepad<T> {
         if (layer.equals(layerStack.getLayer())) return;
 
         layerStack.setLayer(layer);
-        // Push the atRest change physically before priming so suppliers see new layer state.
+        // Push atRest physically before priming so suppliers see the new layer state.
         layerStack.invalidateAll();
         primeAllSuppliers();
         suppressInputsUntilNextInvalidate = true;
     }
 
-    public boolean isActive(CustomGamepad gamepad) {
+    public boolean isActive(LayerGamepad gamepad) {
         return layerStack.isActive(gamepad);
     }
 
@@ -108,12 +103,9 @@ public class LayeredGamepad<T> {
         layerStack.update();
     }
 
-    /**
-     * Refresh every supplier from the underlying gamepads — call once per loop. After a layer
-     * switch this frame, suppliers are primed (no false edges) and inputs resume next frame.
-     */
+    /** Call once per loop. After a layer switch, suppliers are primed and inputs resume next frame. */
     public void invalidateAll() {
-        // Update underlying gamepads first so wrappers don't stay one frame behind.
+        // Refresh underlying gamepads first so wrappers don't stay one frame behind.
         layerStack.invalidateAll();
 
         if (suppressInputsUntilNextInvalidate) {
@@ -122,7 +114,7 @@ public class LayeredGamepad<T> {
             return;
         }
 
-        forEachSupplier(EnhancedBooleanSupplier::invalidate, EnhancedDoubleSupplier::invalidate);
+        forEachSupplier(EdgeBooleanSupplier::invalidate, CachedDoubleSupplier::invalidate);
     }
 
     public void invalidateActive() {
@@ -134,16 +126,16 @@ public class LayeredGamepad<T> {
             return;
         }
 
-        forEachSupplier(EnhancedBooleanSupplier::invalidate, EnhancedDoubleSupplier::invalidate);
+        forEachSupplier(EdgeBooleanSupplier::invalidate, CachedDoubleSupplier::invalidate);
     }
 
     private void primeAllSuppliers() {
-        forEachSupplier(EnhancedBooleanSupplier::primeToCurrentState,
-                EnhancedDoubleSupplier::primeToCurrentState);
+        forEachSupplier(EdgeBooleanSupplier::primeToCurrentState,
+                CachedDoubleSupplier::primeToCurrentState);
     }
 
-    private void forEachSupplier(java.util.function.Consumer<EnhancedBooleanSupplier> bool,
-                                 java.util.function.Consumer<EnhancedDoubleSupplier> dbl) {
+    private void forEachSupplier(java.util.function.Consumer<EdgeBooleanSupplier> bool,
+                                 java.util.function.Consumer<CachedDoubleSupplier> dbl) {
         bool.accept(a); bool.accept(b); bool.accept(x); bool.accept(y);
         bool.accept(dpadUp); bool.accept(dpadDown); bool.accept(dpadLeft); bool.accept(dpadRight);
         bool.accept(leftBumper); bool.accept(rightBumper);
@@ -157,42 +149,42 @@ public class LayeredGamepad<T> {
         dbl.accept(touchpadFinger1X); dbl.accept(touchpadFinger1Y);
     }
 
-    public EnhancedDoubleSupplier getLeftStickX()  { return leftStickX; }
-    public EnhancedDoubleSupplier getLeftStickY()  { return leftStickY; }
-    public EnhancedDoubleSupplier getRightStickX() { return rightStickX; }
-    public EnhancedDoubleSupplier getRightStickY() { return rightStickY; }
-    public EnhancedDoubleSupplier LT() { return leftTrigger; }
-    public EnhancedDoubleSupplier RT() { return rightTrigger; }
+    public CachedDoubleSupplier getLeftStickX()  { return leftStickX; }
+    public CachedDoubleSupplier getLeftStickY()  { return leftStickY; }
+    public CachedDoubleSupplier getRightStickX() { return rightStickX; }
+    public CachedDoubleSupplier getRightStickY() { return rightStickY; }
+    public CachedDoubleSupplier LT() { return leftTrigger; }
+    public CachedDoubleSupplier RT() { return rightTrigger; }
 
-    public EnhancedBooleanSupplier A() { return a; }
-    public EnhancedBooleanSupplier B() { return b; }
-    public EnhancedBooleanSupplier X() { return x; }
-    public EnhancedBooleanSupplier Y() { return y; }
+    public EdgeBooleanSupplier A() { return a; }
+    public EdgeBooleanSupplier B() { return b; }
+    public EdgeBooleanSupplier X() { return x; }
+    public EdgeBooleanSupplier Y() { return y; }
 
-    public EnhancedBooleanSupplier DPAD_UP()    { return dpadUp; }
-    public EnhancedBooleanSupplier DPAD_DOWN()  { return dpadDown; }
-    public EnhancedBooleanSupplier DPAD_LEFT()  { return dpadLeft; }
-    public EnhancedBooleanSupplier DPAD_RIGHT() { return dpadRight; }
+    public EdgeBooleanSupplier DPAD_UP()    { return dpadUp; }
+    public EdgeBooleanSupplier DPAD_DOWN()  { return dpadDown; }
+    public EdgeBooleanSupplier DPAD_LEFT()  { return dpadLeft; }
+    public EdgeBooleanSupplier DPAD_RIGHT() { return dpadRight; }
 
-    public EnhancedBooleanSupplier LB() { return leftBumper; }
-    public EnhancedBooleanSupplier RB() { return rightBumper; }
+    public EdgeBooleanSupplier LB() { return leftBumper; }
+    public EdgeBooleanSupplier RB() { return rightBumper; }
 
-    public EnhancedBooleanSupplier getStart() { return start; }
-    public EnhancedBooleanSupplier getBack()  { return back; }
-    public EnhancedBooleanSupplier getGuide() { return guide; }
+    public EdgeBooleanSupplier getStart() { return start; }
+    public EdgeBooleanSupplier getBack()  { return back; }
+    public EdgeBooleanSupplier getGuide() { return guide; }
 
-    public EnhancedBooleanSupplier LSB() { return leftStickButton; }
-    public EnhancedBooleanSupplier RSB() { return rightStickButton; }
+    public EdgeBooleanSupplier LSB() { return leftStickButton; }
+    public EdgeBooleanSupplier RSB() { return rightStickButton; }
 
-    public EnhancedBooleanSupplier getTouchpad() { return touchpad; }
-    public EnhancedDoubleSupplier  TX() { return touchpadFinger1X; }
-    public EnhancedDoubleSupplier  TY() { return touchpadFinger1Y; }
+    public EdgeBooleanSupplier getTouchpad() { return touchpad; }
+    public CachedDoubleSupplier  TX() { return touchpadFinger1X; }
+    public CachedDoubleSupplier  TY() { return touchpadFinger1Y; }
 
-    public EnhancedBooleanSupplier C() { return A(); }
-    public EnhancedBooleanSupplier O() { return B(); }
-    public EnhancedBooleanSupplier Q() { return X(); }
-    public EnhancedBooleanSupplier T() { return Y(); }
-    public EnhancedBooleanSupplier getOptions() { return getStart(); }
+    public EdgeBooleanSupplier C() { return A(); }
+    public EdgeBooleanSupplier O() { return B(); }
+    public EdgeBooleanSupplier Q() { return X(); }
+    public EdgeBooleanSupplier T() { return Y(); }
+    public EdgeBooleanSupplier getOptions() { return getStart(); }
 
     @Override
     public String toString() {

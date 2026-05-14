@@ -10,7 +10,7 @@ import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
 import org.firstinspires.ftc.teamcode.core.Module;
-import org.firstinspires.ftc.teamcode.core.state.State;
+import org.firstinspires.ftc.teamcode.core.State;
 
 public final class ActionBuilder {
     private final List<Action.Step> steps = new ArrayList<>();
@@ -27,15 +27,15 @@ public final class ActionBuilder {
                         + state.getClass().getSimpleName()
                         + " has no module attached. Register it with a Module before using it.");
             }
-            steps.add(new ApplyState(state));
+            steps.add(new ActivateState(state));
         }
         return this;
     }
 
-    /** Resolve states at execution time rather than build time. Targets aren't pre-registered. */
+    /** Resolve states at execution time; targets are not pre-registered. */
     @SafeVarargs
     public final ActionBuilder setLazy(Supplier<? extends State>... suppliers) {
-        steps.add(new ApplyStateLazy(Arrays.asList(suppliers)));
+        steps.add(new ActivateStateLazy(Arrays.asList(suppliers)));
         return this;
     }
 
@@ -66,7 +66,7 @@ public final class ActionBuilder {
         return waitUntil(() -> !condition.getAsBoolean(), timeoutMs);
     }
 
-    /** Inline another action's steps and targets — flattens nested sequences. */
+    /** Inline another action's steps + targets, flattening nested sequences. */
     public ActionBuilder action(Action action) {
         targets.addAll(action.getTargets());
         steps.addAll(action.steps);
@@ -149,12 +149,11 @@ public final class ActionBuilder {
         return this;
     }
 
-    public ActionBuilder named(String name) {
+    public ActionBuilder withName(String name) {
         this.name = name;
         return this;
     }
 
-    /** Add a module to the target set manually. */
     public ActionBuilder targets(Module module) {
         targets.add(module);
         return this;
@@ -164,21 +163,19 @@ public final class ActionBuilder {
         return new Action(new ArrayList<>(steps), new LinkedHashSet<>(targets), name);
     }
 
-    // ─── Step implementations ────────────────────────────────────────────────
-
-    private static final class ApplyState extends Action.Step {
+    private static final class ActivateState extends Action.Step {
         private final State state;
-        ApplyState(State state) { this.state = state; }
-        @Override protected void start(Action parent) { state.apply(); }
+        ActivateState(State state) { this.state = state; }
+        @Override protected void start(Action parent) { state.activate(); }
         @Override protected boolean tick(Action parent) { return true; }
     }
 
-    private static final class ApplyStateLazy extends Action.Step {
+    private static final class ActivateStateLazy extends Action.Step {
         private final List<Supplier<? extends State>> suppliers;
-        ApplyStateLazy(List<Supplier<? extends State>> suppliers) { this.suppliers = suppliers; }
+        ActivateStateLazy(List<Supplier<? extends State>> suppliers) { this.suppliers = suppliers; }
         @Override
         protected void start(Action parent) {
-            for (Supplier<? extends State> s : suppliers) s.get().apply();
+            for (Supplier<? extends State> s : suppliers) s.get().activate();
         }
         @Override protected boolean tick(Action parent) { return true; }
     }
@@ -269,8 +266,8 @@ public final class ActionBuilder {
         @Override
         protected boolean tick(Action parent) {
             boolean allDone = true;
-            for (Action a : actions) {
-                if (!a.tick()) allDone = false;
+            for (int i = 0; i < actions.size(); i++) {
+                if (!actions.get(i).tick()) allDone = false;
             }
             return allDone;
         }
@@ -293,11 +290,12 @@ public final class ActionBuilder {
         @Override
         protected boolean tick(Action parent) {
             boolean winner = false;
-            for (Action a : actions) {
-                if (a.tick()) winner = true;
+            for (int i = 0; i < actions.size(); i++) {
+                if (actions.get(i).tick()) winner = true;
             }
             if (winner) {
-                for (Action a : actions) {
+                for (int i = 0; i < actions.size(); i++) {
+                    Action a = actions.get(i);
                     if (!a.isComplete()) a.cancel();
                 }
                 return true;

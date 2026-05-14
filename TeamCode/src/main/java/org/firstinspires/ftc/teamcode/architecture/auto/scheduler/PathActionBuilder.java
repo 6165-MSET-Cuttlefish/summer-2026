@@ -1,4 +1,4 @@
-package org.firstinspires.ftc.teamcode.architecture.auto.pathaction;
+package org.firstinspires.ftc.teamcode.architecture.auto.scheduler;
 
 import androidx.annotation.CheckResult;
 import com.pedropathing.follower.Follower;
@@ -17,22 +17,21 @@ import java.util.function.Supplier;
 import org.firstinspires.ftc.teamcode.core.action.Action;
 import org.firstinspires.ftc.teamcode.core.Module;
 import org.firstinspires.ftc.teamcode.core.Robot;
-import org.firstinspires.ftc.teamcode.core.state.State;
+import org.firstinspires.ftc.teamcode.core.State;
 
 /**
- * Fluent builder for an autonomous sequence of paths, actions, and waits. Pending {@code setState},
- * {@code run}, and {@code actionAsync} calls accumulate and flush into the prelude of the next
- * real segment, so they cost zero extra scheduler ticks.
+ * Builds an autonomous sequence of paths, actions, and waits. Queued setState/run/actionDuring
+ * calls accumulate into the next real segment's prelude — zero extra scheduler ticks.
  */
 public class PathActionBuilder {
 
     private final List<PathActionSegment> segments = new ArrayList<>();
-    // Keyed by state class so two state enums on the same module don't clobber each other.
-    private final Map<Class<? extends State>, State> pendingStates = new LinkedHashMap<>();
-    private final List<Runnable> pendingRunnables = new ArrayList<>();
-    private final List<Action> pendingDuringActions = new ArrayList<>();
+    // Keyed by state class so two enums on the same module don't clobber each other.
+    private final Map<Class<? extends State>, State> queuedStates = new LinkedHashMap<>();
+    private final List<Runnable> queuedRunnables = new ArrayList<>();
+    private final List<Action> queuedDuringActions = new ArrayList<>();
 
-    private Pose lastPathEndPose = null;
+    private Pose nextSegmentStartPose = null;
     private boolean enabled = true;
     private boolean lastSegmentDisabled = false;
 
@@ -47,7 +46,7 @@ public class PathActionBuilder {
     }
 
     public PathActionBuilder(Follower follower, LongSupplier clock) {
-        // null follower = late-bind to Robot.robot.follower at use time.
+        // null follower → late-bind to Robot.robot.follower at use time.
         this.follower = follower;
         this.clock = clock;
     }
@@ -57,18 +56,17 @@ public class PathActionBuilder {
     }
 
     public PathActionBuilder setStartPose(Pose startPose) {
-        lastPathEndPose = startPose;
+        nextSegmentStartPose = startPose;
         return this;
     }
 
-    /** Disable subsequent segments. Useful to gate optional routines without restructuring. */
+    /** Gate subsequent segments without restructuring the chain. */
     public PathActionBuilder setEnabled(boolean enabled) {
         if (!enabled) lastSegmentDisabled = true;
         this.enabled = enabled;
         return this;
     }
 
-    /** Queue states to apply at the start of the next real segment. */
     public PathActionBuilder setState(State... states) {
         for (State state : states) {
             Module module = state.getModule();
@@ -77,57 +75,57 @@ public class PathActionBuilder {
                         "State " + state + " has no registered module. "
                         + "Register it via Module.setStates() before calling setState().");
             }
-            pendingStates.put(state.getClass(), state);
+            queuedStates.put(state.getClass(), state);
         }
         return this;
     }
 
-    public PathActionBuilder transitTo(Pose targetPose) {
-        return transitTo(targetPose, 4000);
+    public PathActionBuilder driveTo(Pose targetPose) {
+        return driveTo(targetPose, 4000);
     }
 
-    public PathActionBuilder transitTo(Pose targetPose, int pathTimeoutMs) {
+    public PathActionBuilder driveTo(Pose targetPose, int pathTimeoutMs) {
         segments.add(new PathActionSegment.Builder()
                 .transitTarget(targetPose)
                 .pathTimeoutMs(pathTimeoutMs)
-                .preludeRunnables(drainPendingRunnables())
-                .duringActions(drainPendingDuringActions())
-                .moduleStates(drainPendingStates())
+                .preludeRunnables(drainQueuedRunnables())
+                .duringActions(drainQueuedDuringActions())
+                .moduleStates(drainQueuedStates())
                 .enabled(enabled)
                 .build());
-        lastPathEndPose = targetPose;
+        nextSegmentStartPose = targetPose;
         return this;
     }
 
-    public PathActionBuilder buildPath(Consumer<IntegratedPathBuilder> body) {
-        return buildPath(lastPathEndPose, body, null);
+    public PathActionBuilder buildPath(Consumer<TrackingPathBuilder> body) {
+        return buildPath(nextSegmentStartPose, body, null);
     }
 
-    public PathActionBuilder buildPath(Consumer<IntegratedPathBuilder> body, int pathTimeoutMs) {
-        return buildPath(lastPathEndPose, body, pathTimeoutMs);
+    public PathActionBuilder buildPath(Consumer<TrackingPathBuilder> body, int pathTimeoutMs) {
+        return buildPath(nextSegmentStartPose, body, pathTimeoutMs);
     }
 
-    public PathActionBuilder buildPath(Pose startPose, Consumer<IntegratedPathBuilder> body) {
+    public PathActionBuilder buildPath(Pose startPose, Consumer<TrackingPathBuilder> body) {
         return buildPath(startPose, body, null);
     }
 
-    public PathActionBuilder buildPath(Pose startPose, Consumer<IntegratedPathBuilder> body, int pathTimeoutMs) {
+    public PathActionBuilder buildPath(Pose startPose, Consumer<TrackingPathBuilder> body, int pathTimeoutMs) {
         return buildPath(startPose, body, Integer.valueOf(pathTimeoutMs));
     }
 
-    private PathActionBuilder buildPath(Pose startPose, Consumer<IntegratedPathBuilder> body, Integer pathTimeoutMs) {
+    private PathActionBuilder buildPath(Pose startPose, Consumer<TrackingPathBuilder> body, Integer pathTimeoutMs) {
         Pose safeStart = Objects.requireNonNull(
                 startPose, "startPose is required; call setStartPose() before buildPath");
 
-        // If a disabled segment moved the expected start pose elsewhere, transit back first.
+        // After a disabled segment, transit back if our expected start drifted.
         if (enabled && lastSegmentDisabled
-                && lastPathEndPose != null
-                && !posesApproxEqual(safeStart, lastPathEndPose)) {
-            transitTo(safeStart);
+                && nextSegmentStartPose != null
+                && !posesApproxEqual(safeStart, nextSegmentStartPose)) {
+            driveTo(safeStart);
             lastSegmentDisabled = false;
         }
 
-        IntegratedPathBuilder pathBuilder = new IntegratedPathBuilder(safeStart, follower().pathBuilder());
+        TrackingPathBuilder pathBuilder = new TrackingPathBuilder(safeStart, follower().pathBuilder());
         body.accept(pathBuilder);
         segments.add(buildPathSegment(
                 pathBuilder.buildPath(),
@@ -139,24 +137,23 @@ public class PathActionBuilder {
     }
 
     /**
-     * Path whose geometry is resolved at execution time — body runs when the segment starts, so
-     * it can read live pose / sensor data. {@code declaredEndPose} only seeds the next segment's
-     * default start; the resolved path uses {@code follower.getPose()} at execution.
+     * Path resolved at execution time so the body sees live pose / sensors. {@code declaredEndPose}
+     * only seeds the next segment's default start; the resolved path uses live pose at execution.
      */
-    public PathActionBuilder buildPathDeferred(Pose declaredEndPose, Consumer<IntegratedPathBuilder> body) {
-        if (enabled) lastPathEndPose = declaredEndPose;
+    public PathActionBuilder buildPathDeferred(Pose declaredEndPose, Consumer<TrackingPathBuilder> body) {
+        if (enabled) nextSegmentStartPose = declaredEndPose;
 
         Supplier<PathActionSegment.Resolved> resolver = () -> {
-            IntegratedPathBuilder pb = new IntegratedPathBuilder(follower().getPose(), follower().pathBuilder());
+            TrackingPathBuilder pb = new TrackingPathBuilder(follower().getPose(), follower().pathBuilder());
             body.accept(pb);
             return new PathActionSegment.Resolved(pb.buildPath(), pb.getDuringActions(), pb.isHoldEnd());
         };
 
         segments.add(new PathActionSegment.Builder()
                 .resolver(resolver)
-                .preludeRunnables(drainPendingRunnables())
-                .duringActions(drainPendingDuringActions())
-                .moduleStates(drainPendingStates())
+                .preludeRunnables(drainQueuedRunnables())
+                .duringActions(drainQueuedDuringActions())
+                .moduleStates(drainQueuedStates())
                 .enabled(enabled)
                 .build());
         return this;
@@ -168,15 +165,14 @@ public class PathActionBuilder {
         return this;
     }
 
-    /** Queue a fire-and-forget action that emits with the next real segment's prelude. */
-    public PathActionBuilder actionAsync(Action action) {
-        pendingDuringActions.add(action);
+    /** Fire-and-forget action that emits with the next real segment's prelude. */
+    public PathActionBuilder actionDuring(Action action) {
+        queuedDuringActions.add(action);
         return this;
     }
 
-    /** Queue synchronous code to run at the start of the next real segment. */
     public PathActionBuilder run(Runnable code) {
-        pendingRunnables.add(code);
+        queuedRunnables.add(code);
         return this;
     }
 
@@ -185,9 +181,9 @@ public class PathActionBuilder {
                 .continueConditions(Collections.singletonList(condition))
                 .continueMode(ConditionMode.OR)
                 .timeoutMs(timeoutMs)
-                .preludeRunnables(drainPendingRunnables())
-                .duringActions(drainPendingDuringActions())
-                .moduleStates(drainPendingStates())
+                .preludeRunnables(drainQueuedRunnables())
+                .duringActions(drainQueuedDuringActions())
+                .moduleStates(drainQueuedStates())
                 .enabled(enabled)
                 .build());
         return this;
@@ -199,9 +195,9 @@ public class PathActionBuilder {
 
     public PathActionBuilder delay(int delayMs) {
         segments.add(new PathActionSegment.Builder()
-                .preludeRunnables(drainPendingRunnables())
-                .duringActions(drainPendingDuringActions())
-                .moduleStates(drainPendingStates())
+                .preludeRunnables(drainQueuedRunnables())
+                .duringActions(drainQueuedDuringActions())
+                .moduleStates(drainQueuedStates())
                 .timeoutMs(delayMs)
                 .enabled(enabled)
                 .build());
@@ -221,13 +217,12 @@ public class PathActionBuilder {
 
     @CheckResult
     public PathActionScheduler build() {
-        // Trailing flush: anything still pending becomes a final no-op segment so the scheduler
-        // actually runs it.
-        if (!pendingRunnables.isEmpty() || !pendingDuringActions.isEmpty() || !pendingStates.isEmpty()) {
+        // Flush trailing queue items as a final no-op segment so they actually run.
+        if (!queuedRunnables.isEmpty() || !queuedDuringActions.isEmpty() || !queuedStates.isEmpty()) {
             segments.add(new PathActionSegment.Builder()
-                    .preludeRunnables(drainPendingRunnables())
-                    .duringActions(drainPendingDuringActions())
-                    .moduleStates(drainPendingStates())
+                    .preludeRunnables(drainQueuedRunnables())
+                    .duringActions(drainQueuedDuringActions())
+                    .moduleStates(drainQueuedStates())
                     .enabled(enabled)
                     .build());
         }
@@ -237,35 +232,35 @@ public class PathActionBuilder {
         return scheduler;
     }
 
-    private List<State> drainPendingStates() {
-        List<State> out = new ArrayList<>(pendingStates.values());
-        pendingStates.clear();
+    private List<State> drainQueuedStates() {
+        List<State> out = new ArrayList<>(queuedStates.values());
+        queuedStates.clear();
         return out;
     }
 
-    private List<Runnable> drainPendingRunnables() {
-        List<Runnable> out = new ArrayList<>(pendingRunnables);
-        pendingRunnables.clear();
+    private List<Runnable> drainQueuedRunnables() {
+        List<Runnable> out = new ArrayList<>(queuedRunnables);
+        queuedRunnables.clear();
         return out;
     }
 
-    private List<Action> drainPendingDuringActions() {
-        List<Action> out = new ArrayList<>(pendingDuringActions);
-        pendingDuringActions.clear();
+    private List<Action> drainQueuedDuringActions() {
+        List<Action> out = new ArrayList<>(queuedDuringActions);
+        queuedDuringActions.clear();
         return out;
     }
 
     private PathActionSegment buildPathSegment(
             PathChain path, List<Action> duringActions, boolean holdEnd,
             Integer pathTimeoutMs, Double holdAtDistance) {
-        if (enabled) lastPathEndPose = path.endPose();
+        if (enabled) nextSegmentStartPose = path.endPose();
         List<Action> allDuring = new ArrayList<>(duringActions);
-        allDuring.addAll(drainPendingDuringActions());
+        allDuring.addAll(drainQueuedDuringActions());
         PathActionSegment.Builder b = new PathActionSegment.Builder()
                 .path(path)
-                .preludeRunnables(drainPendingRunnables())
+                .preludeRunnables(drainQueuedRunnables())
                 .duringActions(allDuring)
-                .moduleStates(drainPendingStates())
+                .moduleStates(drainQueuedStates())
                 .holdEnd(holdEnd)
                 .enabled(enabled);
         if (pathTimeoutMs != null) b.pathTimeoutMs(pathTimeoutMs);
@@ -275,10 +270,10 @@ public class PathActionBuilder {
 
     private PathActionSegment buildActionSegment(List<Action> afterActions) {
         return new PathActionSegment.Builder()
-                .preludeRunnables(drainPendingRunnables())
-                .duringActions(drainPendingDuringActions())
+                .preludeRunnables(drainQueuedRunnables())
+                .duringActions(drainQueuedDuringActions())
                 .afterActions(afterActions)
-                .moduleStates(drainPendingStates())
+                .moduleStates(drainQueuedStates())
                 .enabled(enabled)
                 .build();
     }

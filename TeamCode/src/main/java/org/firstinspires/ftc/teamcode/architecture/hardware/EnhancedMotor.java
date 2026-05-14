@@ -10,13 +10,13 @@ import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.CurrentUnit;
 
 /**
- * DcMotorEx wrapper that caches the last-written power (skips redundant I2C writes), clamps to
- * configurable bounds, and applies optional battery-voltage compensation. Configure by chaining
- * {@code new EnhancedMotor(map, "name").withCachingTolerance(0.02).withVoltageCompensation(13.5)}.
+ * DcMotorEx wrapper with last-power caching, clamp bounds, and optional voltage compensation.
+ * E.g. {@code new EnhancedMotor(map, "name").withCachingTolerance(0.02).withVoltageCompensation(13.5)}.
  */
 public class EnhancedMotor implements DcMotorEx {
     private final DcMotorEx motor;
     private final WriteCache cache = new WriteCache();
+    private double cachedVelocity = Double.NaN;
 
     public EnhancedMotor(DcMotorEx motor) {
         this.motor = motor;
@@ -37,20 +37,19 @@ public class EnhancedMotor implements DcMotorEx {
         return this;
     }
 
-    /** Compensate for battery sag. {@code referenceVoltage} is the spec voltage (typically 13.5V). */
+    /** {@code referenceVoltage} = nominal pack voltage (typically 13.5V). */
     public EnhancedMotor withVoltageCompensation(double referenceVoltage) {
         cache.voltageCompensationEnabled = true;
         cache.referenceVoltage = referenceVoltage;
         return this;
     }
 
-    /** EnhancedOpMode publishes the latest reading once per loop; consumers pull on demand. */
     public static void updateVoltage(double voltage) {
-        HardwareVoltage.update(voltage);
+        BatteryVoltage.update(voltage);
     }
 
     public static double getCurrentVoltage() {
-        return HardwareVoltage.get();
+        return BatteryVoltage.get();
     }
 
     @Override
@@ -93,8 +92,16 @@ public class EnhancedMotor implements DcMotorEx {
     @Override public void setMotorDisable() { motor.setMotorDisable(); }
     @Override public boolean isMotorEnabled() { return motor.isMotorEnabled(); }
 
-    @Override public void setVelocity(double angularRate) { motor.setVelocity(angularRate); }
-    @Override public void setVelocity(double angularRate, AngleUnit unit) { motor.setVelocity(angularRate, unit); }
+    @Override
+    public void setVelocity(double angularRate) {
+        if (angularRate == cachedVelocity) return;
+        cachedVelocity = angularRate;
+        motor.setVelocity(angularRate);
+    }
+    @Override public void setVelocity(double angularRate, AngleUnit unit) {
+        cachedVelocity = Double.NaN;
+        motor.setVelocity(angularRate, unit);
+    }
     @Override public double getVelocity() { return motor.getVelocity(); }
     @Override public double getVelocity(AngleUnit unit) { return motor.getVelocity(unit); }
 

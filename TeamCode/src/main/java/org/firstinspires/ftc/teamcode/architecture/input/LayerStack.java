@@ -3,29 +3,23 @@ package org.firstinspires.ftc.teamcode.architecture.input;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
-import org.firstinspires.ftc.teamcode.architecture.input.suppliers.CustomGamepad;
 
 /**
- * A keyed stack of gamepads, of which exactly one is "active" at a time. The active
- * gamepad is the only one whose physical inputs reach the OpMode; the rest are forced
- * to {@code atRest} so suppliers reading them see neutral values.
- *
- * <p>Layer keys can be any type — typically a small enum (e.g. {@code TELE/SORT/ENDGAME}).
- * Map iteration is insertion-order to make {@link #getAvailableLayers()} predictable.
+ * Keyed stack of gamepads — exactly one is active at a time; the rest are forced to
+ * {@code atRest} so their suppliers read neutral. Layer keys are typically a small enum.
  */
 public class LayerStack<T> {
 
-    private final Map<T, CustomGamepad> layers;
+    private final Map<T, LayerGamepad> layers;
     private T currentLayer;
 
-    public LayerStack(T initialLayer, Map<T, CustomGamepad> layers) {
+    public LayerStack(T initialLayer, Map<T, LayerGamepad> layers) {
         if (layers == null || layers.isEmpty()) {
             throw new IllegalArgumentException("layers cannot be null or empty");
         }
         if (initialLayer != null && !layers.containsKey(initialLayer)) {
             throw new IllegalArgumentException("initial layer " + initialLayer + " is not in the map");
         }
-        // Defensive copy keeps callers from mutating us through a shared reference.
         this.layers = new LinkedHashMap<>(layers);
         this.currentLayer = initialLayer;
         update();
@@ -42,11 +36,11 @@ public class LayerStack<T> {
         update();
     }
 
-    public CustomGamepad getGamepad() {
+    public LayerGamepad getGamepad() {
         return currentLayer == null ? null : layers.get(currentLayer);
     }
 
-    public boolean isActive(CustomGamepad gamepad) {
+    public boolean isActive(LayerGamepad gamepad) {
         if (gamepad == null || currentLayer == null) return false;
         return gamepad.equals(layers.get(currentLayer));
     }
@@ -56,7 +50,7 @@ public class LayerStack<T> {
     public int getLayerCount() { return layers.size(); }
     public boolean isEmpty() { return layers.isEmpty(); }
 
-    public void putLayer(T layer, CustomGamepad gamepad) {
+    public void putLayer(T layer, LayerGamepad gamepad) {
         if (layer == null) throw new IllegalArgumentException("layer cannot be null");
         if (gamepad == null) throw new IllegalArgumentException("gamepad cannot be null");
         layers.put(layer, gamepad);
@@ -64,9 +58,9 @@ public class LayerStack<T> {
         update();
     }
 
-    public CustomGamepad removeLayer(T layer) {
+    public LayerGamepad removeLayer(T layer) {
         if (layer == null) return null;
-        CustomGamepad removed = layers.remove(layer);
+        LayerGamepad removed = layers.remove(layer);
         if (layer.equals(currentLayer)) {
             currentLayer = layers.isEmpty() ? null : layers.keySet().iterator().next();
             update();
@@ -76,22 +70,20 @@ public class LayerStack<T> {
 
     /** Push the active/atRest state into every underlying gamepad. */
     public void update() {
-        for (Map.Entry<T, CustomGamepad> entry : layers.entrySet()) {
-            CustomGamepad gp = entry.getValue();
+        for (Map.Entry<T, LayerGamepad> entry : layers.entrySet()) {
+            LayerGamepad gp = entry.getValue();
             if (gp != null) gp.setAtRest(!entry.getKey().equals(currentLayer));
         }
     }
 
-    /** Drop cached state on every underlying gamepad so the next read sees fresh hardware. */
     public void invalidateAll() {
-        for (CustomGamepad gp : layers.values()) {
+        for (LayerGamepad gp : layers.values()) {
             if (gp != null) gp.invalidateAll();
         }
     }
 
-    /** Drop cached state only on the currently active gamepad. */
     public void invalidateActive() {
-        CustomGamepad active = getGamepad();
+        LayerGamepad active = getGamepad();
         if (active != null) {
             active.invalidateAll();
         }

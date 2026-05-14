@@ -11,30 +11,29 @@ import com.qualcomm.robotcore.util.ElapsedTime;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.firstinspires.ftc.robotcore.external.navigation.CurrentUnit;
 import org.firstinspires.ftc.teamcode.architecture.auto.FieldVisualization;
-import org.firstinspires.ftc.teamcode.architecture.diagnostics.LoopProfiler;
+import org.firstinspires.ftc.teamcode.architecture.telemetry.LoopProfiler;
 import org.firstinspires.ftc.teamcode.architecture.hardware.EnhancedCRServo;
 import org.firstinspires.ftc.teamcode.architecture.hardware.EnhancedMotor;
-import org.firstinspires.ftc.teamcode.architecture.telemetry.BrailleRenderer;
-import org.firstinspires.ftc.teamcode.architecture.telemetry.EnhancedTelemetry;
+import org.firstinspires.ftc.teamcode.architecture.telemetry.FieldMapRenderer;
+import org.firstinspires.ftc.teamcode.architecture.telemetry.DualTelemetry;
 import org.firstinspires.ftc.teamcode.architecture.telemetry.HtmlFormatter;
 import org.firstinspires.ftc.teamcode.core.action.Action;
 import org.firstinspires.ftc.teamcode.core.action.Actions;
-import org.firstinspires.ftc.teamcode.core.state.StateRegistry;
+import org.firstinspires.ftc.teamcode.core.State;
 
 import static org.firstinspires.ftc.teamcode.core.Robot.telemetryToggles;
 import static org.firstinspires.ftc.teamcode.architecture.telemetry.HtmlFormatter.*;
-import static org.firstinspires.ftc.teamcode.architecture.diagnostics.OptimizationToggles.*;
+import static org.firstinspires.ftc.teamcode.architecture.OptimizationToggles.*;
 
 /**
  * Base OpMode with auto-discovered modules, voltage compensation, dual telemetry, and dashboard
- * field rendering. Subclasses provide a Robot via {@link #createRobot()} and override
- * {@link #initialize()} / {@link #initializeLoop()} / {@link #primaryLoop()} as needed.
+ * field rendering. Subclasses provide a {@link Robot} via {@link #createRobot()}.
  */
 public abstract class EnhancedOpMode extends OpMode {
     protected Robot robot;
@@ -61,27 +60,26 @@ public abstract class EnhancedOpMode extends OpMode {
     private boolean stopRequested = false;
     private boolean isInit = false;
 
-    private BrailleRenderer field;
+    private FieldMapRenderer field;
     private String cachedFieldHtml = "";
     private double lastFieldRenderX = Double.NaN;
     private double lastFieldRenderY = Double.NaN;
     private double lastFieldRenderHeading = Double.NaN;
     private int loopsSinceFieldRender = Integer.MAX_VALUE;
-    /** Re-render the DS field map at most every N loops even when the pose is still. */
+    private AllianceColor cachedAllianceColor;
+    private String cachedAllianceHtml;
+    /** Re-render the DS field map at most every N loops even when the pose hasn't moved. */
     protected int fieldRenderInterval = 10;
 
-    /** Hold the loop to at least this many ms (0 = no holding). Stabilizes control loop timing. */
+    /** Hold each loop to at least this many ms (0 = no holding). Stabilizes control timing. */
     protected int minLoopMs = 0;
-    /**
-     * Loops between battery-voltage reads. The bus call costs a few ms; voltage moves slowly,
-     * so 50 loops (~250 ms at 5 ms/loop) is plenty.
-     */
+    /** Loops between voltage reads. Bus call costs a few ms; voltage moves slowly. */
     protected int voltageReadLoopInterval = 50;
     protected boolean voltageCompensationEnabled = true;
 
     protected void initialize() {}
     protected void initializeLoop() {}
-    protected void primaryLoop() {}
+    protected void gameLoop() {}
     protected void onStart() {}
     protected void onEnd() {}
     protected void telemetry() {}
@@ -89,20 +87,17 @@ public abstract class EnhancedOpMode extends OpMode {
     protected boolean shouldWriteDuringInit() { return false; }
     protected boolean shouldReadDuringInit() { return true; }
     protected boolean shouldPreservePosition() { return true; }
-    protected boolean shouldInitializeSRSHub() { return true; }
 
-    /** Game subclass produces its typed {@link Robot} here. Called once before module discovery. */
     protected abstract Robot createRobot() throws InterruptedException;
 
-    /** Called at the top of every init_loop and loop, before module reads. Default: no-op. */
+    /** Called at the top of every init_loop and loop, before module reads. */
     protected void onLoopStart() {}
 
     @Override
     public final void init() {
-        // Sloth hot-reloads and back-to-back opmode runs leave stale framework state behind:
-        // the State→Module map and the Actions active list both live in static fields. Rebuild
-        // both before this opmode's modules instantiate.
-        StateRegistry.clearModuleBindings();
+        // State→Module map and Actions active list live in statics — drop stale entries from
+        // prior runs (Sloth hot-reload, back-to-back opmodes) before modules instantiate.
+        State.clearModuleBindings();
         Actions.cancelAll();
 
         configureBulkCaching();
@@ -125,7 +120,7 @@ public abstract class EnhancedOpMode extends OpMode {
         gameTimer.reset();
         isInit = true;
 
-        field = new BrailleRenderer(73, 74);
+        field = new FieldMapRenderer(73, 74);
         field.drawFieldLayout();
         field.snapshot();
     }
@@ -157,18 +152,18 @@ public abstract class EnhancedOpMode extends OpMode {
         if (shouldReadDuringInit()) readModules();
         profiler.mark("readModules");
 
-        Pose currentPose = robot.follower.getPose();
-        addStatusTelemetry(currentPose);
-        profiler.mark("statusTelemetry");
-
         robot.follower.update();
         profiler.mark("follower.update");
 
         initializeLoop();
         profiler.mark("initializeLoop");
 
-        // Wait 500 ms after init_loop starts before writing — gives the SDK a chance to settle
-        // its hardware mode/direction calls so the very first writes don't fight them.
+        // Init-scoped: start() calls Actions.reset(), so anything in flight at match start
+        // gets cancelled.
+        Actions.update();
+        profiler.mark("actions");
+
+        // 500 ms grace before the first write so SDK mode/direction calls settle.
         if (shouldWriteDuringInit() && gameTimer.milliseconds() > 500) {
             writeModules();
         }
@@ -177,7 +172,7 @@ public abstract class EnhancedOpMode extends OpMode {
         updateTelemetry();
         profiler.mark("updateTelemetry");
 
-        updateDashboard(currentPose);
+        updateDashboard();
         profiler.mark("updateDashboard");
 
         loopTimer.reset();
@@ -221,19 +216,13 @@ public abstract class EnhancedOpMode extends OpMode {
         readModules();
         profiler.mark("readModules");
 
-        Pose currentPose = robot.follower.getPose();
-        addStatusTelemetry(currentPose);
-        profiler.mark("statusTelemetry");
-
-        robot.updateWriteToggles();
         robot.follower.update();
         profiler.mark("follower.update");
 
-        primaryLoop();
-        profiler.mark("primaryLoop");
+        gameLoop();
+        profiler.mark("gameLoop");
 
-        // Pump every scheduled action once. Runs on this thread, between user code and hardware
-        // writes, so action-applied state lands in the same write pass.
+        // Run between user code and writes so action-applied state lands in the same write pass.
         Actions.update();
         profiler.mark("actions");
 
@@ -243,7 +232,7 @@ public abstract class EnhancedOpMode extends OpMode {
         updateTelemetry();
         profiler.mark("updateTelemetry");
 
-        updateDashboard(currentPose);
+        updateDashboard();
         profiler.mark("updateDashboard");
 
         long remaining = minLoopMs - (long) loopTimer.milliseconds();
@@ -265,12 +254,12 @@ public abstract class EnhancedOpMode extends OpMode {
         if (robot != null && robot.pathActionScheduler != null) {
             robot.pathActionScheduler.cancelAll();
         }
-        // Modules can now put hardware in a safe state with nothing else racing them.
+        // Modules can put hardware in a safe state with nothing else racing them.
         for (int i = 0; i < modules.size(); i++) {
             try {
                 modules.get(i).stop();
             } catch (Exception e) {
-                // One bad module shouldn't block the rest from shutting down cleanly.
+                // One bad module shouldn't block the rest from shutting down.
                 e.printStackTrace();
             }
         }
@@ -285,7 +274,8 @@ public abstract class EnhancedOpMode extends OpMode {
     }
 
     private void autoDiscoverModules() {
-        Set<Object> visited = new HashSet<>();
+        // Identity-based so user classes that override equals/hashCode don't collide.
+        Set<Object> visited = Collections.newSetFromMap(new IdentityHashMap<>());
         try {
             discover(this, getClass(), visited);
         } catch (IllegalAccessException e) {
@@ -322,6 +312,7 @@ public abstract class EnhancedOpMode extends OpMode {
     private void initModules() {
         for (Module m : modules) {
             m.setTelemetry(telemetry);
+            m.initStates();
             m.init();
         }
     }
@@ -346,9 +337,9 @@ public abstract class EnhancedOpMode extends OpMode {
         for (int i = 0; i < modules.size(); i++) {
             Module m = modules.get(i);
             m.refreshTunables();
-            long t = profiler.startScope();
+            long t = profiler.enterSection();
             m.read();
-            profiler.endScope(m.getReadScopeKey(), t);
+            profiler.leaveSection(m.getReadSectionName(), t);
         }
     }
 
@@ -356,9 +347,9 @@ public abstract class EnhancedOpMode extends OpMode {
         for (int i = 0; i < modules.size(); i++) {
             Module m = modules.get(i);
             if (m.isWriteEnabled()) {
-                long t = profiler.startScope();
+                long t = profiler.enterSection();
                 m.write();
-                profiler.endScope(m.getWriteScopeKey(), t);
+                profiler.leaveSection(m.getWriteSectionName(), t);
             }
         }
     }
@@ -366,7 +357,7 @@ public abstract class EnhancedOpMode extends OpMode {
     private void scheduleDefaultActions() {
         for (Module m : modules) {
             Action def = m.getDefaultAction();
-            if (def != null && !Actions.isModuleActive(m)) def.run();
+            if (def != null && !Actions.isModuleActive(m)) def.schedule();
         }
     }
 
@@ -378,7 +369,7 @@ public abstract class EnhancedOpMode extends OpMode {
     }
 
     private void clearBulkCaches() {
-        for (LynxModule hub : lynxHubs) hub.clearBulkCache();
+        for (int i = 0; i < lynxHubs.size(); i++) lynxHubs.get(i).clearBulkCache();
     }
 
     private void updateVoltageThrottled() {
@@ -394,12 +385,14 @@ public abstract class EnhancedOpMode extends OpMode {
     private void updateTelemetry() {
         int every = Math.max(1, telemetryEveryNLoops);
         if (every > 1 && (telemetryLoopCounter++ % every) != 0) {
-            telemetry.update();
+            // Pending items carry over; calling update() here would cause partial-packet flicker.
             return;
         }
 
-        if (telemetry instanceof EnhancedTelemetry) {
-            EnhancedTelemetry et = (EnhancedTelemetry) telemetry;
+        addStatusTelemetry();
+
+        if (telemetry instanceof DualTelemetry) {
+            DualTelemetry et = (DualTelemetry) telemetry;
 
             et.addDashboardData("Game Time", "%.1fs", gameTimer.seconds());
             et.addData("Loop Time", "%.1fms (avg %.1fms)", loopTimer.milliseconds(), avgLoopMs());
@@ -407,13 +400,16 @@ public abstract class EnhancedOpMode extends OpMode {
             if (!modules.isEmpty()) {
                 et.addSeparator();
                 et.addGroupHeader("MODULES", HtmlFormatter.COLOR_MODULE);
-                for (Module m : telemetryOrderedModules()) m.telemetry();
+                List<Module> ordered = telemetryOrderedModules();
+                for (int i = 0; i < ordered.size(); i++) ordered.get(i).telemetry();
             }
 
             if (telemetryToggles.loopProfile) {
                 et.addSeparator();
                 et.addGroupHeader("LOOP PROFILE (avg ms)", HtmlFormatter.COLOR_BLUE);
-                for (Map.Entry<String, Double> entry : profiler.snapshotSortedDesc()) {
+                List<Map.Entry<String, Double>> snapshot = profiler.snapshotSortedDesc();
+                for (int i = 0; i < snapshot.size(); i++) {
+                    Map.Entry<String, Double> entry = snapshot.get(i);
                     et.addDashboardData(entry.getKey(), "%.2fms", entry.getValue());
                 }
             }
@@ -422,7 +418,8 @@ public abstract class EnhancedOpMode extends OpMode {
         } else {
             telemetry.addData("Game Time", "%.1fs", gameTimer.seconds());
             telemetry.addData("Loop Time", "%.1fms (avg %.1fms)", loopTimer.milliseconds(), avgLoopMs());
-            for (Module m : telemetryOrderedModules()) m.telemetry();
+            List<Module> ordered = telemetryOrderedModules();
+            for (int i = 0; i < ordered.size(); i++) ordered.get(i).telemetry();
         }
 
         telemetry();
@@ -434,7 +431,6 @@ public abstract class EnhancedOpMode extends OpMode {
         double fx = fieldPose.getX();
         double fy = fieldPose.getY();
         double fh = robot.follower.getHeading();
-        // Re-render only when the robot moved meaningfully or we've gone N loops without a refresh.
         boolean poseChanged = Math.abs(fx - lastFieldRenderX) > 0.5
                 || Math.abs(fy - lastFieldRenderY) > 0.5
                 || Math.abs(fh - lastFieldRenderHeading) > Math.toRadians(2);
@@ -442,7 +438,7 @@ public abstract class EnhancedOpMode extends OpMode {
             field.restore();
             field.drawRobot(fx, fy, fh,
                     Context.allianceColor.equals(AllianceColor.RED) ? COLOR_RED : COLOR_BLUE);
-            cachedFieldHtml = HtmlFormatter.htmlSize(FONT_MINI_FIELD, field.renderHtml());
+            cachedFieldHtml = HtmlFormatter.htmlSize(FONT_SMALL, field.renderHtml());
             lastFieldRenderX = fx;
             lastFieldRenderY = fy;
             lastFieldRenderHeading = fh;
@@ -453,10 +449,10 @@ public abstract class EnhancedOpMode extends OpMode {
         robot.telemetry.addDSLine(cachedFieldHtml);
     }
 
-    protected void updateDashboard(Pose currentPose) {
+    protected void updateDashboard() {
         int every = Math.max(1, dashboardEveryNLoops);
         if (every > 1 && (dashboardLoopCounter++ % every) != 0) {
-            // Drop accumulated draws on skipped loops by replacing the packet wholesale.
+            // Discard any draws accumulated this loop by swapping in a fresh packet.
             robot.packet = new TelemetryPacket(false);
             return;
         }
@@ -471,7 +467,7 @@ public abstract class EnhancedOpMode extends OpMode {
 
         if (!dashboardSkipGrid) overlay.drawGrid(0, 0, 144, 144, 7, 7);
 
-        FieldVisualization.drawRobot(currentPose);
+        FieldVisualization.drawRobot(robot.follower.getPose());
 
         if (!dashboardSkipPoseHistory) {
             int poseEvery = Math.max(1, dashboardPoseHistoryEveryNLoops);
@@ -484,7 +480,8 @@ public abstract class EnhancedOpMode extends OpMode {
         robot.packet = new TelemetryPacket(false);
     }
 
-    private void addStatusTelemetry(Pose currentPose) {
+    private void addStatusTelemetry() {
+        Pose currentPose = robot.follower.getPose();
         robot.telemetry.addGroupHeader("ROBOT STATUS");
         addAllianceTelemetry();
         robot.telemetry.addData("Robot Position", "X: %.1f, Y: %.1f, Heading: %.1f°",
@@ -493,12 +490,15 @@ public abstract class EnhancedOpMode extends OpMode {
     }
 
     private void addAllianceTelemetry() {
-        String colorHex = Context.allianceColor == AllianceColor.RED
-                ? HtmlFormatter.COLOR_RED
-                : HtmlFormatter.COLOR_BLUE;
-        String htmlValue = HtmlFormatter.htmlColor(colorHex,
-                HtmlFormatter.htmlBold(String.valueOf(Context.allianceColor)));
-        robot.telemetry.addDSRawHtml("Alliance", htmlValue);
+        if (Context.allianceColor != cachedAllianceColor) {
+            cachedAllianceColor = Context.allianceColor;
+            String colorHex = Context.allianceColor == AllianceColor.RED
+                    ? HtmlFormatter.COLOR_RED
+                    : HtmlFormatter.COLOR_BLUE;
+            cachedAllianceHtml = HtmlFormatter.htmlColor(colorHex,
+                    HtmlFormatter.htmlBold(String.valueOf(Context.allianceColor)));
+        }
+        robot.telemetry.addDSRawHtml("Alliance", cachedAllianceHtml);
         robot.telemetry.addDashboardData("Alliance Color", Context.allianceColor);
     }
 
