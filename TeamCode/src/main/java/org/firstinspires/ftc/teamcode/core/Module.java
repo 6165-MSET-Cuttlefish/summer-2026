@@ -11,16 +11,14 @@ import java.util.Map;
 import org.firstinspires.ftc.robotcore.external.Telemetry;
 
 /**
- * Base class for robot subsystem modules with state machine support.
- * Extend this class and implement initStates(), read(), and write().
+ * Base class for robot subsystem modules. Subclasses implement {@link #initStates()},
+ * {@link #read()}, and {@link #write()}.
  */
 public abstract class Module {
     private static final int DEFAULT_HISTORY_SIZE = 50;
     private int maxHistorySize = DEFAULT_HISTORY_SIZE;
-    
+
     private final List<State> states = new ArrayList<>();
-    /** Class → current state, kept in lockstep with {@link #states}. O(1) lookup when
-     *  {@code optimizeStateLookupMap} is on; otherwise we still maintain it but read from the list. */
     private final Map<Class<? extends State>, State> stateMap = new HashMap<>();
     private final List<TransitionGuard<?>> guards = new ArrayList<>();
     private final List<StateHook> enterHooks = new ArrayList<>();
@@ -50,32 +48,20 @@ public abstract class Module {
     public final String getReadScopeKey() { return readScopeKey; }
     public final String getWriteScopeKey() { return writeScopeKey; }
 
-    /** Initialize states for this module. Call setStates() here. */
     protected abstract void initStates();
-
-    /** Read sensor inputs. Called each loop before onLoop(). */
     protected abstract void read();
-
-    /** Write command outputs to hardware. Called each loop after onLoop(). */
     protected abstract void write();
 
-    /** Called once after module discovery. Override for additional setup. */
     public void init() {}
-
-    /** Called after any state transition. Override to react to changes. */
     protected void onStateChange() {}
-
-    /** Override to add custom telemetry for this module. */
     protected void onTelemetry() {}
 
-    /** Telemetry render order in the MODULES section — lower values render first. Default 0. */
+    /** Render order in the MODULES telemetry section; lower first. */
     public int telemetryOrder() { return 0; }
 
     /**
-     * Register initial states for this module. States of the same class are mutually
-     * exclusive — only one can be active at a time. Each variant of an enum-typed state is
-     * also bound to this module and reset to its initial value, so re-running an OpMode
-     * starts from a clean baseline.
+     * Register the initial state for each state-class this module owns. For enum states, every
+     * variant is bound to this module and reset to its initial value so a re-run starts clean.
      */
     protected final void setStates(State... initialStates) {
         states.clear();
@@ -86,8 +72,8 @@ public abstract class Module {
             stateMap.put(s.getClass(), s);
 
             if (s instanceof Enum<?>) {
-                // getDeclaringClass handles enum constants with bodies (which would otherwise
-                // be anonymous subclasses with null getEnumConstants()).
+                // getDeclaringClass handles enum constants with bodies (otherwise anonymous
+                // subclasses, getEnumConstants() returns null on those).
                 Class<?> enumClass = ((Enum<?>) s).getDeclaringClass();
                 Object[] constants = enumClass.getEnumConstants();
                 if (constants != null) {
@@ -102,9 +88,8 @@ public abstract class Module {
     }
 
     /**
-     * Get the current state instance of the given type. Throws if no state of that type is
-     * registered. Map lookup is O(1) for the common case (exact class key); the list scan
-     * fallback preserves isInstance() semantics for subclass-keyed lookups.
+     * Current state of the given class. Map lookup is O(1); the list-scan fallback preserves
+     * isInstance() semantics for subclass-keyed lookups.
      */
     @SuppressWarnings("unchecked")
     public final <T extends State> T get(Class<T> stateClass) {
@@ -118,16 +103,13 @@ public abstract class Module {
     }
 
     /**
-     * Transition to a new state. Returns true if the transition succeeded OR was a no-op
-     * because {@code newState} matches the current state of that class. Returns false only
-     * when no state of {@code newState}'s class is registered, or a guard blocks it.
+     * Transition to {@code newState}. True on success or no-op (already in that state); false
+     * when the state class isn't registered or a guard rejected the transition.
      */
     public final boolean set(State newState) {
         for (int i = 0; i < states.size(); i++) {
             State current = states.get(i);
             if (newState.getClass() != current.getClass()) continue;
-            // Same-state set() is a successful no-op so callers can use the return value as
-            // "is this state class registered" rather than "did anything change".
             if (newState.equals(current)) return true;
 
             if (!checkGuards(current, newState)) return false;
@@ -135,9 +117,7 @@ public abstract class Module {
             fireExitHooks(current);
 
             stateHistory.addLast(current);
-            if (stateHistory.size() > maxHistorySize) {
-                stateHistory.pollFirst();
-            }
+            if (stateHistory.size() > maxHistorySize) stateHistory.pollFirst();
 
             states.set(i, newState);
             stateMap.put(newState.getClass(), newState);
@@ -151,76 +131,44 @@ public abstract class Module {
         return false;
     }
 
-    /**
-     * Check if this module is currently in any of the given states.
-     */
     public final boolean isIn(State... checkStates) {
         for (State check : checkStates) {
-            State current = get(check.getClass());
-            if (current.equals(check))
-                return true;
+            if (get(check.getClass()).equals(check)) return true;
         }
         return false;
     }
 
-    /**
-     * Check if this module is currently in ALL of the given states simultaneously.
-     * Useful for compound conditions across multiple state dimensions.
-     */
     public final boolean isInAll(State... checkStates) {
         for (State check : checkStates) {
-            State current = get(check.getClass());
-            if (!current.equals(check))
-                return false;
+            if (!get(check.getClass()).equals(check)) return false;
         }
         return true;
     }
 
-    /**
-     * Get the time in milliseconds since the last state transition.
-     */
     public final long stateTimeMs() {
         return (long) stateTimer.milliseconds();
     }
 
-    /**
-     * Get an unmodifiable list of previous states (most recent last).
-     */
     public final List<State> getHistory() {
         return Collections.unmodifiableList(new ArrayList<>(stateHistory));
     }
 
-    /**
-     * Set the maximum number of states to retain in history.
-     */
     public final void setMaxHistorySize(int size) {
         this.maxHistorySize = Math.max(1, size);
     }
 
-    /** Get the current maximum history size. */
     public final int getMaxHistorySize() {
         return maxHistorySize;
     }
 
-    /**
-     * Register a guard that can block transitions for the given state type.
-     * @param stateClass The state type to guard
-     * @param guard A function that returns false to block the transition
-     */
     protected final <T extends State> void guard(Class<T> stateClass, TransitionCheck<T> guard) {
         guards.add(new TransitionGuard<>(stateClass, guard));
     }
 
-    /**
-     * Register a hook that fires when transitioning INTO the given state.
-     */
     protected final void onEnter(State state, Runnable action) {
         enterHooks.add(new StateHook(state, action));
     }
 
-    /**
-     * Register a hook that fires when transitioning OUT OF the given state.
-     */
     protected final void onExit(State state, Runnable action) {
         exitHooks.add(new StateHook(state, action));
     }
@@ -230,9 +178,7 @@ public abstract class Module {
         for (TransitionGuard<?> g : guards) {
             if (g.stateClass == from.getClass()) {
                 TransitionGuard<T> typedGuard = (TransitionGuard<T>) g;
-                if (!typedGuard.check.test((T) from, (T) to)) {
-                    return false;
-                }
+                if (!typedGuard.check.test((T) from, (T) to)) return false;
             }
         }
         return true;
@@ -240,41 +186,31 @@ public abstract class Module {
 
     private void fireEnterHooks(State state) {
         for (StateHook h : enterHooks) {
-            if (h.state.equals(state)) {
-                h.action.run();
-            }
+            if (h.state.equals(state)) h.action.run();
         }
     }
 
     private void fireExitHooks(State state) {
         for (StateHook h : exitHooks) {
-            if (h.state.equals(state)) {
-                h.action.run();
-            }
+            if (h.state.equals(state)) h.action.run();
         }
     }
 
-    final void setTelemetry(Telemetry t) {
-        this.telemetry = t;
-    }
+    final void setTelemetry(Telemetry t) { this.telemetry = t; }
 
-    protected final Telemetry getTelemetry() {
-        return telemetry;
-    }
+    protected final Telemetry getTelemetry() { return telemetry; }
 
     protected final String getStateString() {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < states.size(); i++) {
-            if (i > 0)
-                sb.append(" | ");
+            if (i > 0) sb.append(" | ");
             sb.append(states.get(i));
         }
         return sb.toString();
     }
 
     protected void telemetry() {
-        if (!telemetryEnabled || telemetry == null)
-            return;
+        if (!telemetryEnabled || telemetry == null) return;
 
         EnhancedTelemetry et = getEnhancedTelemetry();
         if (et != null) {
@@ -285,128 +221,63 @@ public abstract class Module {
         onTelemetry();
     }
 
-    /**
-     * Set a display name for this module (used in telemetry and error messages).
-     * @return this module for chaining
-     */
     public final Module named(String name) {
         this.name = name;
         recomputeScopeKeys();
         return this;
     }
 
-    /** Get the display name of this module. */
-    public final String getName() {
-        return name;
-    }
+    public final String getName() { return name; }
 
-    /** Enable or disable automatic telemetry output for this module. */
-    public final void setTelemetryEnabled(boolean enabled) {
-        this.telemetryEnabled = enabled;
-    }
+    public final void setTelemetryEnabled(boolean enabled) { this.telemetryEnabled = enabled; }
 
-    /** Enable or disable hardware writes during OpMode.loop(). */
-    public final void setWriteEnabled(boolean enabled) {
-        this.writeEnabled = enabled;
-    }
+    public final void setWriteEnabled(boolean enabled) { this.writeEnabled = enabled; }
+    public final boolean isWriteEnabled() { return writeEnabled; }
 
-    /** Check if hardware writes are enabled for this module. */
-    public final boolean isWriteEnabled() {
-        return writeEnabled;
-    }
+    /** Action to schedule from {@link EnhancedOpMode#start()}. Null to skip. */
+    public final void setDefaultAction(Action action) { this.defaultAction = action; }
+    public final Action getDefaultAction() { return defaultAction; }
 
-    /**
-     * Set a default Action to run automatically when the OpMode starts.
-     */
-    public final void setDefaultAction(Action action) {
-        this.defaultAction = action;
-    }
-
-    /** Get the default action, or null if none is set. */
-    public final Action getDefaultAction() {
-        return defaultAction;
-    }
-
-    /**
-     * Get the telemetry as EnhancedTelemetry, or null if not available.
-     */
     protected final EnhancedTelemetry getEnhancedTelemetry() {
-        if (telemetry instanceof EnhancedTelemetry) {
-            return (EnhancedTelemetry) telemetry;
-        }
-        return null;
+        return telemetry instanceof EnhancedTelemetry ? (EnhancedTelemetry) telemetry : null;
     }
 
-    /**
-     * Log a value to Driver Station only.
-     */
     protected final void logDS(String caption, Object value) {
         EnhancedTelemetry et = getEnhancedTelemetry();
-        if (et != null) {
-            et.addDSData(name + " " + caption, value);
-        } else {
-            log(caption, value);
-        }
+        if (et != null) et.addDSData(name + " " + caption, value);
+        else log(caption, value);
     }
 
-    /**
-     * Log a formatted string to Driver Station only.
-     */
     protected final void logDS(String caption, String format, Object... args) {
         EnhancedTelemetry et = getEnhancedTelemetry();
-        if (et != null) {
-            et.addDSData(name + " " + caption, format, args);
-        } else {
-            log(caption, format, args);
-        }
+        if (et != null) et.addDSData(name + " " + caption, format, args);
+        else log(caption, format, args);
     }
 
-    /**
-     * Log a value to FTC Dashboard only.
-     */
     protected final void logDashboard(String caption, Object value) {
         EnhancedTelemetry et = getEnhancedTelemetry();
-        if (et != null) {
-            et.addDashboardData(name + " " + caption, value);
-        } else {
-            log(caption, value);
-        }
+        if (et != null) et.addDashboardData(name + " " + caption, value);
+        else log(caption, value);
     }
 
-    /**
-     * Log a formatted string to FTC Dashboard only.
-     */
     protected final void logDashboard(String caption, String format, Object... args) {
         EnhancedTelemetry et = getEnhancedTelemetry();
-        if (et != null) {
-            et.addDashboardData(name + " " + caption, format, args);
-        } else {
-            log(caption, format, args);
-        }
+        if (et != null) et.addDashboardData(name + " " + caption, format, args);
+        else log(caption, format, args);
     }
 
-    /**
-     * Log a value to telemetry with the module name prefix.
-     */
     protected final void log(String caption, Object value) {
         if (telemetryEnabled && telemetry != null) {
             telemetry.addData(name + " " + caption, value);
         }
     }
 
-    /**
-     * Log a formatted string to telemetry with the module name prefix.
-     */
     protected final void log(String caption, String format, Object... args) {
         if (telemetryEnabled && telemetry != null) {
             telemetry.addData(name + " " + caption, String.format(format, args));
         }
     }
 
-    /**
-     * Functional interface for transition guards.
-     * Return false to block a state transition.
-     */
     @FunctionalInterface
     public interface TransitionCheck<T extends State> {
         boolean test(T from, T to);

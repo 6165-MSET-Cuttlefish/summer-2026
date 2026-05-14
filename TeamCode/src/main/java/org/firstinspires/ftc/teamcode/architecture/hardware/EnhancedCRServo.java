@@ -7,8 +7,8 @@ import com.qualcomm.robotcore.hardware.PwmControl;
 import com.qualcomm.robotcore.hardware.ServoController;
 
 /**
- * Enhanced CRServo wrapper with power caching, bounds, and voltage compensation. Configure by
- * chaining: {@code new EnhancedCRServo(servo).withCachingTolerance(0.02).withVoltageCompensation(13.5)}.
+ * CRServo wrapper with power caching, bounds, and voltage compensation. Same shape as
+ * {@link EnhancedMotor}.
  */
 public class EnhancedCRServo implements CRServo, PwmControl {
     private final CRServoImplEx crServo;
@@ -23,8 +23,6 @@ public class EnhancedCRServo implements CRServo, PwmControl {
         this.crServo = hardwareMap.get(CRServoImplEx.class, name);
         cache.referenceVoltage = 13.5;
     }
-
-    // ─── caching / bounds / voltage configuration ────────────────────────────
 
     public EnhancedCRServo withCachingTolerance(double tolerance) {
         cache.tolerance = tolerance;
@@ -43,12 +41,9 @@ public class EnhancedCRServo implements CRServo, PwmControl {
         return this;
     }
 
-    /** Publish a fresh battery voltage reading; called by EnhancedOpMode each loop. */
     public static void updateVoltage(double voltage) {
         HardwareVoltage.update(voltage);
     }
-
-    // ─── setPower with caching ───────────────────────────────────────────────
 
     @Override
     public void setPower(double power) {
@@ -59,7 +54,7 @@ public class EnhancedCRServo implements CRServo, PwmControl {
         }
     }
 
-    /** Set power directly without voltage compensation. Useful for testing. */
+    /** Bypass voltage compensation and the write cache. Test-only. */
     public void setPowerRaw(double power) {
         double corrected = cache.clamp(power);
         cache.store(corrected);
@@ -85,8 +80,6 @@ public class EnhancedCRServo implements CRServo, PwmControl {
 
     public CRServoImplEx getUnderlying() { return crServo; }
     public double getCachedPower() { return cache.cached; }
-
-    // ─── CRServo / PwmControl interface (forwarded) ──────────────────────────
 
     @Override public ServoController getController() { return crServo.getController(); }
     @Override public int getPortNumber() { return crServo.getPortNumber(); }

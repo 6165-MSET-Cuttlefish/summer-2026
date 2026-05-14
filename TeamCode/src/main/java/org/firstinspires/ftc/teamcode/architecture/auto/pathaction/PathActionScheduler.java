@@ -16,13 +16,8 @@ import org.firstinspires.ftc.teamcode.core.Robot;
 import org.firstinspires.ftc.teamcode.core.State;
 
 /**
- * Drives a list of {@link PathActionSegment}s through a small state machine. Each tick this
- * advances the current segment by exactly one transition, so the scheduler never blocks the
- * OpMode loop.
- *
- * <p>The scheduler is decoupled from the singleton {@code Robot.robot} via an injected
- * {@link Follower} and clock. The no-arg constructor pulls them from the singleton as a
- * back-compat default.
+ * Drives a list of {@link PathActionSegment}s through a small state machine. Each {@link #update()}
+ * advances by exactly one transition, so the scheduler never blocks the OpMode loop.
  */
 public class PathActionScheduler {
     private static final String TAG = "PathActionScheduler";
@@ -47,7 +42,8 @@ public class PathActionScheduler {
     }
 
     public PathActionScheduler(Follower follower, LongSupplier clock) {
-        this.follower = follower; // null = late-bound to Robot.robot.follower at use time
+        // null follower = late-bind to Robot.robot.follower at use time.
+        this.follower = follower;
         this.clock = clock != null ? clock : SystemClock::elapsedRealtime;
     }
 
@@ -58,8 +54,6 @@ public class PathActionScheduler {
     private long now() {
         return clock.getAsLong();
     }
-
-    // ─── segment registration ────────────────────────────────────────────────
 
     public PathActionScheduler addSegment(PathActionSegment segment) {
         segments.add(segment);
@@ -89,8 +83,6 @@ public class PathActionScheduler {
     public int getTotalSegments() { return segments.size(); }
     public boolean isComplete() { return currentIndex >= segments.size(); }
 
-    // ─── lifecycle ───────────────────────────────────────────────────────────
-
     public void reset() {
         currentIndex = 0;
         currentState = SchedulerState.IDLE;
@@ -108,8 +100,6 @@ public class PathActionScheduler {
         cancelAsyncOperations();
     }
 
-    // ─── overrides ───────────────────────────────────────────────────────────
-
     public void setOverride(Callable<Boolean> condition, Runnable callback) {
         overrideConditions.clear();
         overrideConditions.add(condition);
@@ -126,11 +116,7 @@ public class PathActionScheduler {
         if (overrideCallback != null) overrideCallback.run();
     }
 
-    // ─── tick ────────────────────────────────────────────────────────────────
-
-    /**
-     * Advance the scheduler by one transition. Call once per OpMode loop.
-     */
+    /** Advance the scheduler by one transition. Call once per OpMode loop. */
     public void update() {
         if (!overrideTriggered && shouldTriggerOverride()) {
             triggerOverride();
@@ -141,8 +127,8 @@ public class PathActionScheduler {
         PathActionSegment segment = getCurrentSegment();
         if (segment == null) return;
 
-        // Hard timeout fires from any state. Honor after-actions before advancing so things
-        // like "shoot the preload after this drive" still fire when the drive times out.
+        // Honor after-actions on timeout — autos that "drive then shoot" should still shoot
+        // when the drive doesn't finish in time.
         if (currentState != SchedulerState.IDLE && hasTimedOut(segment)) {
             if (currentState == SchedulerState.PATH_RUNNING) stopCurrentPath();
             if (kickOffAfterActions(segment)) return;
@@ -177,9 +163,9 @@ public class PathActionScheduler {
             return;
         }
         if (shouldHoldAtDistance(segment)) {
-            // Advance the scheduler but do NOT touch the follower. Pedro finishes the path
-            // and auto-engages its end-hold; intermediate segments overlap with Pedro's final
-            // convergence so the next followPath() hands off cleanly.
+            // Advance the scheduler without touching the follower — Pedro finishes the path
+            // and engages its end-hold on its own, so subsequent segments overlap that final
+            // convergence and the next followPath() hands off cleanly.
             executeAfterActions(segment);
             return;
         }
@@ -205,8 +191,6 @@ public class PathActionScheduler {
           .append(" A:").append(seg.getAfterActions().size());
         return sb.toString();
     }
-
-    // ─── per-state transitions ───────────────────────────────────────────────
 
     private void initializeSegment(PathActionSegment segment) {
         segmentStartTime = now();
@@ -250,7 +234,8 @@ public class PathActionScheduler {
             for (int i = 0; i < during.size(); i++) during.get(i).run();
             activeDuringActions = new ArrayList<>(during);
         } else if (!segment.getDuringActions().isEmpty()) {
-            // Fire-and-forget: don't track, so they aren't cancelled when the segment advances.
+            // Pure fire-and-forget segment (no path). Don't track them so segment advance
+            // doesn't cancel.
             List<Action> during = segment.getDuringActions();
             for (int i = 0; i < during.size(); i++) during.get(i).run();
             executeAfterActions(segment);
@@ -299,14 +284,15 @@ public class PathActionScheduler {
             return;
         }
         if (!segment.hasPath()) return;
+        // Re-issuing followPath(path, true) is how we ask Pedro to engage its end-hold.
         if (segment.isHoldEnd()) follower().followPath(segment.getPath(), true);
         else follower().breakFollowing();
     }
 
     /**
-     * Abort the current segment's path-following (if any) and advance. After-actions on the
-     * skipped segment are still kicked off so cleanup like "shoot the preload" runs even when
-     * the path is interrupted.
+     * Skip the current segment but still fire its after-actions. Use when the segment hit an
+     * external abort condition (driver intervention, override) where the path should stop but
+     * cleanup work needs to run.
      */
     public void skipCurrentSegment() {
         PathActionSegment segment = getCurrentSegment();
@@ -316,11 +302,6 @@ public class PathActionScheduler {
         advanceToNextSegment();
     }
 
-    /**
-     * Fire the segment's after-actions and transition to AFTER_ACTION so the normal state
-     * machine drains them. Returns false (no transition) when the segment has no after-actions
-     * or we're already past them.
-     */
     private boolean kickOffAfterActions(PathActionSegment segment) {
         if (currentState == SchedulerState.AFTER_ACTION
                 || currentState == SchedulerState.WAITING
@@ -331,8 +312,6 @@ public class PathActionScheduler {
         executeAfterActions(segment);
         return true;
     }
-
-    // ─── condition / timeout helpers ─────────────────────────────────────────
 
     private boolean areActionsComplete() {
         for (int i = 0; i < pendingActions.size(); i++) {
@@ -359,7 +338,8 @@ public class PathActionScheduler {
         List<Callable<Boolean>> conditions = segment.getContinueConditions();
         if (conditions.isEmpty()) {
             boolean hasTimeout = segment.getTimeoutMs() != null && segment.getTimeoutMs() > -1;
-            return !hasTimeout; // no timeout, no conditions → continue immediately
+            // No timeout + no conditions = continue immediately.
+            return !hasTimeout;
         }
         return combine(conditions, segment.getContinueMode());
     }

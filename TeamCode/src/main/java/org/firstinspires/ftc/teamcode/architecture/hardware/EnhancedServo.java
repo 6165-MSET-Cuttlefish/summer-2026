@@ -7,11 +7,8 @@ import com.qualcomm.robotcore.hardware.ServoController;
 import com.qualcomm.robotcore.hardware.ServoImplEx;
 
 /**
- * Enhanced Servo wrapper with position caching and bounds. Configure by chaining:
- * {@code new EnhancedServo(servo).withCachingTolerance(0.001).withPositionBounds(0.1, 0.9)}.
- *
- * <p>Servos run on PWM and don't need voltage compensation, so this is the simpler cousin of
- * {@link EnhancedMotor} / {@link EnhancedCRServo}.
+ * Servo wrapper with position caching and bounds. No voltage compensation — servos run on PWM
+ * and aren't power-scaled like motors / CR servos.
  */
 public class EnhancedServo implements Servo, PwmControl {
     private final ServoImplEx servo;
@@ -19,7 +16,7 @@ public class EnhancedServo implements Servo, PwmControl {
 
     public EnhancedServo(ServoImplEx servo) {
         this.servo = servo;
-        // Servo positions are 0..1, not -1..1 like motor power.
+        // Servo positions are 0..1, not -1..1.
         cache.min = 0.0;
         cache.max = 1.0;
     }
@@ -27,8 +24,6 @@ public class EnhancedServo implements Servo, PwmControl {
     public EnhancedServo(HardwareMap hardwareMap, String name) {
         this(hardwareMap.get(ServoImplEx.class, name));
     }
-
-    // ─── caching / bounds configuration ──────────────────────────────────────
 
     public EnhancedServo withCachingTolerance(double tolerance) {
         cache.tolerance = tolerance;
@@ -41,8 +36,6 @@ public class EnhancedServo implements Servo, PwmControl {
         return this;
     }
 
-    // ─── setPosition with caching ────────────────────────────────────────────
-
     @Override
     public void setPosition(double position) {
         double corrected = cache.clamp(position);
@@ -52,7 +45,7 @@ public class EnhancedServo implements Servo, PwmControl {
         }
     }
 
-    /** Set position directly without caching. Useful for testing. */
+    /** Bypass the write cache. Test-only. */
     public void setPositionRaw(double position) {
         double corrected = cache.clamp(position);
         cache.store(corrected);
@@ -66,8 +59,6 @@ public class EnhancedServo implements Servo, PwmControl {
     public double getCachingTolerance() { return cache.tolerance; }
     public ServoImplEx getUnderlying() { return servo; }
     public double getCachedPosition() { return cache.cached; }
-
-    // ─── Servo / PwmControl interface (forwarded) ────────────────────────────
 
     @Override public ServoController getController() { return servo.getController(); }
     @Override public int getPortNumber() { return servo.getPortNumber(); }

@@ -1,18 +1,11 @@
 package org.firstinspires.ftc.teamcode.core;
 
 /**
- * Static HTML helpers for telemetry text. The Driver Station renders a small subset of HTML;
- * this class centralizes the wrapping so callers don't sprinkle raw tags through their code.
- *
- * <p>Color and font-size constants live here so a single static-import pulls the whole vocabulary:
- * <pre>{@code
- * import static org.firstinspires.ftc.teamcode.core.HtmlFormatter.*;
- * }</pre>
+ * HTML wrapping helpers for Driver Station telemetry. Static-imported into telemetry call sites
+ * so callers don't sprinkle raw tags through their code.
  */
 public final class HtmlFormatter {
     private HtmlFormatter() {}
-
-    // ─── color palette ───────────────────────────────────────────────────────
 
     public static final String COLOR_VALUE  = "#e37c07";
     public static final String COLOR_MODULE = "#4fc3f7";
@@ -23,20 +16,15 @@ public final class HtmlFormatter {
     public static final String COLOR_BLUE   = "#448aff";
     public static final String COLOR_GRAY   = "#9e9e9e";
 
-    // ─── font-size scale ─────────────────────────────────────────────────────
-    // Values map to the number of <big>/<small> wraps applied by htmlSize.
-
-    /** Set externally if a particular OpMode wants a different mini-field size. */
+    // Number of <big>/<small> wraps applied by htmlSize. FONT_MINI_FIELD and FONT_FIELD are
+    // mutable so opmode-side code can pick a different size.
     public static int FONT_MINI_FIELD = -1;
-    /** Set externally for the on-DS field rendering. */
     public static int FONT_FIELD = -1;
     public static final int FONT_SMALL   = -1;
     public static final int FONT_NORMAL  = 0;
     public static final int FONT_LARGE   = 1;
     public static final int FONT_XLARGE  = 2;
     public static final int FONT_XXLARGE = 3;
-
-    // ─── tag helpers ─────────────────────────────────────────────────────────
 
     public static String htmlBold(String text) {
         return "<b>" + text + "</b>";
@@ -46,10 +34,7 @@ public final class HtmlFormatter {
         return "<font color='" + hex + "'>" + text + "</font>";
     }
 
-    /**
-     * Wraps {@code text} in nested {@code <big>} (positive) or {@code <small>} (negative) tags.
-     * {@code size == 0} returns the input unchanged.
-     */
+    /** Positive sizes nest {@code <big>}; negative nest {@code <small>}; 0 returns input. */
     public static String htmlSize(int size, String text) {
         if (size == 0) return text;
         StringBuilder out = new StringBuilder(text.length() + 16);

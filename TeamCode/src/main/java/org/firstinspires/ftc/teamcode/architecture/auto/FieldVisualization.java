@@ -20,22 +20,16 @@ public class FieldVisualization {
 
     private FieldVisualization() {}
 
-    /** Convert a Pedro-coordinates pose to the FTC-standard (field-centered) frame. */
     public static Pose toField(Pose pedroPose) {
         return pedroPose.getAsCoordinateSystem(FTCCoordinates.INSTANCE);
     }
 
-    /**
-     * (x, y) variant that skips the per-point Pose allocation. Math mirrors
-     * {@link FTCCoordinates#convertFromPedro} — translate by -(72,72), rotate -π/2.
-     */
+    /** Mirrors FTCCoordinates.convertFromPedro without allocating a Pose. */
     public static double[] toField(double x, double y) {
         double transX = x - 72.0;
         double transY = y - 72.0;
         return new double[]{ transY, -transX };
     }
-
-    public static void init() {}
 
     public static Canvas getCanvas() {
         return robot.packet.fieldOverlay();

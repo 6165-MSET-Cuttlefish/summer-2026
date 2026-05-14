@@ -23,32 +23,21 @@ class Action internal constructor(
     private val cancelled = AtomicBoolean(false)
     private val completedEarly = AtomicBoolean(false)
 
-    /**
-     * Schedule this action to run asynchronously.
-     * Actions that target the same modules will be auto-cancelled.
-     */
+    /** Schedule async; actions targeting the same modules auto-cancel each other. */
     fun run() {
         Actions.run(this)
     }
 
-    /**
-     * Block and run this action synchronously until complete.
-     */
+    /** Block the caller until this action completes. Don't call from the OpMode loop thread. */
     fun runBlocking() {
         runBlocking { runSuspending() }
     }
 
-    /**
-     * Suspend and execute all steps of this action.
-     */
     suspend fun runSuspending() {
         reset()
         runSteps()
     }
 
-    /**
-     * Request this action to stop executing.
-     */
     fun cancel() {
         cancelled.set(true)
         job?.cancel()
@@ -63,22 +52,16 @@ class Action internal constructor(
     val isCancelled: Boolean
         get() = cancelled.get()
 
-    /**
-     * Get progress [0..1] through all steps.
-     */
     val progress: Float
         get() = if (steps.isEmpty()) 1f else stepIndex.get().toFloat() / steps.size
 
-    /**
-     * Get the set of modules that this action targets.
-     */
     val targets: Set<Module>
         get() = targetModules
 
     val name: String
         get() = actionName
 
-    /** Stops the action after the current step without marking it as cancelled. */
+    /** Stop after the current step finishes, without flagging the action as cancelled. */
     fun completeEarly() {
         completedEarly.set(true)
     }
@@ -132,21 +115,15 @@ class Action internal constructor(
 
     override fun toString(): String = "$actionName(${steps.size} steps)"
 
-    /** A single executable step within an action. */
     fun interface Step {
         suspend fun run(parent: Action)
     }
 }
 
-/**
- * Manages execution of Actions with conflict detection and lifecycle.
- * Actions targeting the same modules automatically cancel each other.
- */
 object Actions {
     private val active = ConcurrentHashMap<Action, Job>()
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
-    /** Creates an action that sets multiple states. */
     @JvmStatic
     fun set(vararg states: State): Action {
         val b = ActionBuilder()
@@ -154,7 +131,7 @@ object Actions {
         return b.build()
     }
 
-    /** Creates an action that resolves and applies states at execution time. */
+    /** Resolve states at execution time rather than build time. */
     @SafeVarargs
     @JvmStatic
     fun setLazy(vararg suppliers: java.util.function.Supplier<out State>): Action =
@@ -172,7 +149,6 @@ object Actions {
     @JvmStatic
     fun delay(ms: Long): Action = ActionBuilder().delay(ms).build()
 
-    /** Creates an action that does nothing and completes immediately. */
     @JvmStatic
     fun noop(): Action = ActionBuilder().build()
 
@@ -183,7 +159,6 @@ object Actions {
     fun waitUntil(condition: () -> Boolean, timeoutMs: Long): Action =
         ActionBuilder().waitUntil(condition, timeoutMs).build()
 
-    /** Runs actions one after another. */
     @JvmStatic
     fun sequence(vararg actions: Action): Action {
         val b = ActionBuilder()
@@ -193,12 +168,10 @@ object Actions {
 
     @JvmStatic
     fun parallel(vararg actions: Action): Action =
-        /** Runs all actions concurrently and waits for all to complete. */
         ActionBuilder().parallel(*actions).named("Parallel").build()
 
     @JvmStatic
     fun race(vararg actions: Action): Action =
-        /** Runs all actions and completes when the first one finishes. */
         ActionBuilder().race(*actions).named("Race").build()
 
     @JvmStatic
@@ -221,22 +194,18 @@ object Actions {
     fun ifElse(condition: () -> Boolean, ifTrue: Action, ifFalse: Action): Action =
         ActionBuilder().ifElse(condition, ifTrue, ifFalse).named("IfElse").build()
 
-    /** Retries action until success condition met or max attempts reached. */
     @JvmStatic
     fun retry(action: Action, maxAttempts: Int, success: () -> Boolean): Action =
         ActionBuilder().retry(action, maxAttempts, success).named("Retry").build()
 
-    /** Retries action with delay between attempts. */
     @JvmStatic
     fun retry(action: Action, maxAttempts: Int, delayMs: Long, success: () -> Boolean): Action =
         ActionBuilder().retry(action, maxAttempts, delayMs, success).named("Retry").build()
 
-    /** Retries runnable until success condition met or max attempts reached. */
     @JvmStatic
     fun retry(code: Runnable, maxAttempts: Int, success: () -> Boolean): Action =
         ActionBuilder().retry(code, maxAttempts, success).named("Retry").build()
 
-    /** Retries runnable with delay between attempts. */
     @JvmStatic
     fun retry(code: Runnable, maxAttempts: Int, delayMs: Long, success: () -> Boolean): Action =
         ActionBuilder().retry(code, maxAttempts, delayMs, success).named("Retry").build()
@@ -245,13 +214,11 @@ object Actions {
     fun builder(): ActionBuilder = ActionBuilder()
 
     internal fun run(action: Action) {
-        // Cancel conflicting actions targeting the same modules
         active.keys.filter { conflicts(it, action) }.forEach {
             it.cancel()
             active.remove(it)
         }
 
-        // Cancel if already running
         active[action]?.let {
             action.cancel()
             active.remove(action)
@@ -263,7 +230,8 @@ object Actions {
             try {
                 action.runSteps()
             } finally {
-                // Only remove if we're still the active job (avoid removing a re-launched entry)
+                // Only remove if we're still the active job — guard against a re-launch that
+                // replaced us between launch and finally.
                 active.remove(action, myJob)
             }
         }
@@ -275,14 +243,12 @@ object Actions {
     private fun conflicts(a: Action, b: Action): Boolean =
         a.targets.any { it in b.targets }
 
-    /** Cancels all currently active actions. */
     @JvmStatic
     fun cancelAll() {
         active.keys.forEach { it.cancel() }
         active.clear()
     }
 
-    /** Cancels only actions targeting the specified modules. */
     @JvmStatic
     fun cancelFor(vararg modules: Module) {
         active.keys.filter { action -> modules.any { it in action.targets } }.forEach {
@@ -297,7 +263,6 @@ object Actions {
     @JvmStatic
     fun activeCount(): Int = active.size
 
-    /** Checks if any action is currently targeting this module. */
     @JvmStatic
     fun isModuleActive(module: Module): Boolean =
         active.keys.any { module in it.targets }
@@ -305,14 +270,12 @@ object Actions {
     @JvmStatic
     fun getActive(): List<Action> = active.keys.toList()
 
-    /** Clean shutdown: cancels all and cleans up coroutine scope. */
     @JvmStatic
     fun shutdown() {
         cancelAll()
         scope.coroutineContext.cancelChildren()
     }
 
-    /** Resets by cancelling all actions (used at OpMode.start()). */
     @JvmStatic
     fun reset() {
         cancelAll()

@@ -16,17 +16,11 @@ import org.firstinspires.ftc.teamcode.architecture.auto.RobotHardwareConfig;
 import org.firstinspires.ftc.teamcode.architecture.auto.pathaction.PathActionScheduler;
 
 /**
- * Game-agnostic base class for the robot. Holds purely framework state — telemetry, follower,
- * scheduler, target poses, opmode reference — and exposes hooks ({@link #initializeGameModules()},
- * {@link #setTargetPosesForAlliance()}, {@link #updateWriteToggles()}) that the game-specific
- * subclass implements. The constructor wires up framework state and then calls those hooks.
- *
- * <p>Subclasses provide the actual mechanism modules (drivetrain, shooter, etc.) and any
- * game-specific telemetry/write toggles.
+ * Game-agnostic robot base. Holds the framework-level state (telemetry, follower, scheduler,
+ * shared target poses) and exposes hooks for the game subclass to wire up its mechanisms.
  */
 @Config
 public abstract class Robot {
-    /** Set in this class's constructor; read by framework helpers that still need a fallback singleton. */
     public static Robot robot;
 
     public final EnhancedTelemetry telemetry;
@@ -39,7 +33,6 @@ public abstract class Robot {
     public Pose targetApriltagPose;
     public Pose cornerPose;
 
-    /** Framework-only telemetry toggles (game subclasses keep their own). */
     public static FrameworkTelemetry telemetryToggles = new FrameworkTelemetry();
 
     protected Robot(EnhancedOpMode opMode, boolean preservePosition, boolean initSRSHub)
@@ -61,6 +54,7 @@ public abstract class Robot {
 
     private void initializeFollower(boolean preservePosition, Robot previousRobot) {
         if (preservePosition && previousRobot != null && previousRobot.follower != null) {
+            // Read live Pinpoint pose so a hot-reload / opmode swap doesn't snap us back to start.
             GoBildaPinpointDriver pinpoint = opMode.hardwareMap.get(
                     GoBildaPinpointDriver.class, RobotHardwareConfig.PINPOINT_NAME);
             pinpoint.update();
@@ -78,23 +72,16 @@ public abstract class Robot {
         }
     }
 
-    /** Game subclass hook: instantiate game-specific mechanism modules. */
     protected abstract void initializeGameModules();
-
-    /** Game subclass hook: assign {@link #targetPose}, {@link #targetApriltagPose}, {@link #cornerPose}. */
     protected abstract void setTargetPosesForAlliance();
-
-    /** Push the latest dashboard {@code WriteToggles} state into module flags. */
     public abstract void updateWriteToggles();
 
-    /** Framework-only telemetry toggles. Game subclasses keep their own static instances. */
     public static class FrameworkTelemetry {
         public boolean dsTelemetry = true;
         public boolean dashboardTelemetry = true;
         public boolean dsDebug = false;
         public boolean voltage = true;
         public boolean current = false;
-        /** Render per-section loop-time breakdown in dashboard telemetry. */
         public boolean loopProfile = OptimizationToggles.loopProfileTelemetryByDefault;
     }
 }

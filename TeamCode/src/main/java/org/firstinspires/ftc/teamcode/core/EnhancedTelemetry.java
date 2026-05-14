@@ -8,12 +8,8 @@ import static org.firstinspires.ftc.teamcode.core.HtmlFormatter.*;
 import static org.firstinspires.ftc.teamcode.core.OptimizationToggles.telemetryLazyFormat;
 
 /**
- * Telemetry implementation that fans out every call to two backends: the Driver Station
- * (HTML-formatted) and FTC Dashboard (plain text). Adds a few convenience helpers for
- * group/subgroup headers and DS-only or Dashboard-only data.
- *
- * <p>HTML/color/font constants live in {@link HtmlFormatter}; the on-screen field renderer
- * lives in {@link BrailleRenderer}.
+ * Fan-out telemetry: every call goes to the Driver Station (HTML-formatted) and FTC Dashboard
+ * (plain text). Disable either backend with the static enable flags.
  */
 public class EnhancedTelemetry implements Telemetry {
     public static boolean enableDSTelemetry = true;
@@ -22,7 +18,6 @@ public class EnhancedTelemetry implements Telemetry {
     private final Telemetry dsTelemetry;
     private final Telemetry dashTelemetry;
     private int defaultFontSize = FONT_NORMAL;
-    /** Singleton used by lazy-mode addData calls when both backends are disabled. */
     private static final Item EMPTY_ITEM = new EnhancedItem(null, null);
 
     public EnhancedTelemetry(Telemetry dsTelemetry, Telemetry dashTelemetry) {
@@ -35,7 +30,6 @@ public class EnhancedTelemetry implements Telemetry {
         if (enableDSTelemetry) this.dsTelemetry.setMsTransmissionInterval(interval);
     }
 
-    /** Default size for {@link #addData} formatting. Use the {@code FONT_*} constants. */
     public void setDefaultFontSize(int size) { this.defaultFontSize = size; }
     public int getDefaultFontSize() { return defaultFontSize; }
 
@@ -46,8 +40,6 @@ public class EnhancedTelemetry implements Telemetry {
     private String fmtValue(Object value) {
         return htmlColorSize(COLOR_VALUE, defaultFontSize, String.valueOf(value));
     }
-
-    // ─── group / subgroup / separator ────────────────────────────────────────
 
     public void addGroupHeader(String groupName) {
         addGroupHeader(groupName, COLOR_MODULE);
@@ -72,7 +64,6 @@ public class EnhancedTelemetry implements Telemetry {
         if (enableDashboardTelemetry) dashTelemetry.addLine("");
     }
 
-    /** Add a module header to DS (colored module name + state) and plain to dashboard. */
     public void addModuleHeader(String moduleName, String stateString) {
         if (enableDSTelemetry) {
             dsTelemetry.addData(
@@ -81,8 +72,6 @@ public class EnhancedTelemetry implements Telemetry {
         }
         if (enableDashboardTelemetry) dashTelemetry.addData(moduleName, stateString);
     }
-
-    // ─── DS-only / Dashboard-only convenience ────────────────────────────────
 
     public Item addDSLargeData(String caption, Object value) {
         if (!enableDSTelemetry) return EMPTY_ITEM;
@@ -107,7 +96,6 @@ public class EnhancedTelemetry implements Telemetry {
         return this;
     }
 
-    /** Add raw HTML data to the DS telemetry (caller handles formatting). */
     public EnhancedTelemetry addDSRawHtml(String caption, String htmlValue) {
         if (enableDSTelemetry) dsTelemetry.addData(fmtCaption(caption), htmlValue);
         return this;
@@ -119,13 +107,10 @@ public class EnhancedTelemetry implements Telemetry {
     }
 
     public EnhancedTelemetry addDashboardData(String caption, String format, Object... args) {
-        // Dashboard telemetry already accepts (caption, format, args) and formats lazily, so we
-        // don't need to pre-format here even when lazy mode is off.
+        // Dashboard's addData(caption, format, args) formats lazily, so we forward verbatim.
         if (enableDashboardTelemetry) dashTelemetry.addData(caption, format, args);
         return this;
     }
-
-    // ─── Telemetry interface (forwarded to both backends) ────────────────────
 
     @Override
     public Item addData(String caption, String format, Object... args) {
@@ -317,10 +302,6 @@ public class EnhancedTelemetry implements Telemetry {
         return new CombinedLog(dsLog, dashLog);
     }
 
-    // ─── inner fan-out implementations ───────────────────────────────────────
-
-    /** Two-slot fan-out (DS + dashboard) without the per-call ArrayList. Either slot may be
-     *  null when its backend is disabled at the time the item was created. */
     private static class EnhancedItem implements Item {
         @Nullable private final Item ds;
         @Nullable private final Item dash;
@@ -452,10 +433,8 @@ public class EnhancedTelemetry implements Telemetry {
     }
 
     private static class CombinedLog implements Log {
-        @Nullable
-        private final Log dsLog;
-        @Nullable
-        private final Log dashLog;
+        @Nullable private final Log dsLog;
+        @Nullable private final Log dashLog;
 
         CombinedLog(Log dsLog, Log dashLog) {
             this.dsLog = dsLog;

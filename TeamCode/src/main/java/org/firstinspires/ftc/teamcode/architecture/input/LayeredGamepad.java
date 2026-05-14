@@ -80,8 +80,6 @@ public class LayeredGamepad<T> {
         return new EnhancedDoubleSupplier(source);
     }
 
-    // ─── layer control ───────────────────────────────────────────────────────
-
     public LayerStack<T> getLayerStack() { return layerStack; }
 
     public CustomGamepad getActiveGamepad() {
@@ -110,12 +108,9 @@ public class LayeredGamepad<T> {
         layerStack.update();
     }
 
-    // ─── frame lifecycle ─────────────────────────────────────────────────────
-
     /**
-     * Refresh every supplier from the underlying gamepads. Call once per loop, before reading.
-     * If a layer switch happened this frame, suppliers are primed (no false edges) and inputs
-     * resume on the next frame.
+     * Refresh every supplier from the underlying gamepads — call once per loop. After a layer
+     * switch this frame, suppliers are primed (no false edges) and inputs resume next frame.
      */
     public void invalidateAll() {
         // Update underlying gamepads first so wrappers don't stay one frame behind.
@@ -162,16 +157,12 @@ public class LayeredGamepad<T> {
         dbl.accept(touchpadFinger1X); dbl.accept(touchpadFinger1Y);
     }
 
-    // ─── stick / trigger accessors ───────────────────────────────────────────
-
     public EnhancedDoubleSupplier getLeftStickX()  { return leftStickX; }
     public EnhancedDoubleSupplier getLeftStickY()  { return leftStickY; }
     public EnhancedDoubleSupplier getRightStickX() { return rightStickX; }
     public EnhancedDoubleSupplier getRightStickY() { return rightStickY; }
     public EnhancedDoubleSupplier LT() { return leftTrigger; }
     public EnhancedDoubleSupplier RT() { return rightTrigger; }
-
-    // ─── face / dpad / bumper / system ───────────────────────────────────────
 
     public EnhancedBooleanSupplier A() { return a; }
     public EnhancedBooleanSupplier B() { return b; }
@@ -196,8 +187,6 @@ public class LayeredGamepad<T> {
     public EnhancedBooleanSupplier getTouchpad() { return touchpad; }
     public EnhancedDoubleSupplier  TX() { return touchpadFinger1X; }
     public EnhancedDoubleSupplier  TY() { return touchpadFinger1Y; }
-
-    // ─── PlayStation aliases ─────────────────────────────────────────────────
 
     public EnhancedBooleanSupplier C() { return A(); }
     public EnhancedBooleanSupplier O() { return B(); }

@@ -10,8 +10,9 @@ import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.CurrentUnit;
 
 /**
- * Enhanced DcMotorEx wrapper with power caching, bounds, and voltage compensation. Configure
- * by chaining: {@code new EnhancedMotor(motor).withCachingTolerance(0.02).withVoltageCompensation(13.5)}.
+ * DcMotorEx wrapper that caches the last-written power (skips redundant I2C writes), clamps to
+ * configurable bounds, and applies optional battery-voltage compensation. Configure by chaining
+ * {@code new EnhancedMotor(map, "name").withCachingTolerance(0.02).withVoltageCompensation(13.5)}.
  */
 public class EnhancedMotor implements DcMotorEx {
     private final DcMotorEx motor;
@@ -25,13 +26,6 @@ public class EnhancedMotor implements DcMotorEx {
         this.motor = hardwareMap.get(DcMotorEx.class, name);
     }
 
-    // ─── caching / bounds / voltage configuration ────────────────────────────
-
-    /**
-     * Set how much power must change before writing to hardware.
-     * Reduces communication traffic and improves loop times.
-     * @param tolerance Power change threshold (0.0 to 2.0).
-     */
     public EnhancedMotor withCachingTolerance(double tolerance) {
         cache.tolerance = tolerance;
         return this;
@@ -43,17 +37,14 @@ public class EnhancedMotor implements DcMotorEx {
         return this;
     }
 
-    /**
-     * Enable voltage compensation; {@code referenceVoltage} is the battery voltage at which a
-     * power command of 1.0 would produce full output (typically 13.5 V).
-     */
+    /** Compensate for battery sag. {@code referenceVoltage} is the spec voltage (typically 13.5V). */
     public EnhancedMotor withVoltageCompensation(double referenceVoltage) {
         cache.voltageCompensationEnabled = true;
         cache.referenceVoltage = referenceVoltage;
         return this;
     }
 
-    /** Publish a fresh battery voltage reading; called by EnhancedOpMode each loop. */
+    /** EnhancedOpMode publishes the latest reading once per loop; consumers pull on demand. */
     public static void updateVoltage(double voltage) {
         HardwareVoltage.update(voltage);
     }
@@ -61,8 +52,6 @@ public class EnhancedMotor implements DcMotorEx {
     public static double getCurrentVoltage() {
         return HardwareVoltage.get();
     }
-
-    // ─── setPower with caching ───────────────────────────────────────────────
 
     @Override
     public void setPower(double power) {
@@ -73,14 +62,12 @@ public class EnhancedMotor implements DcMotorEx {
         }
     }
 
-    /** Set power directly without voltage compensation. Useful for testing. */
+    /** Bypass voltage compensation and the write cache. Test-only. */
     public void setPowerRaw(double power) {
         double corrected = cache.clamp(power);
         cache.store(corrected);
         motor.setPower(corrected);
     }
-
-    // ─── setters / getters for compensation config ───────────────────────────
 
     public void setCachingTolerance(double tolerance) {
         cache.tolerance = Math.max(0.0, Math.min(1.0, tolerance));
@@ -101,8 +88,6 @@ public class EnhancedMotor implements DcMotorEx {
 
     public DcMotorEx getUnderlying() { return motor; }
     public double getCachedPower() { return cache.cached; }
-
-    // ─── DcMotorEx interface (forwarded) ─────────────────────────────────────
 
     @Override public void setMotorEnable() { motor.setMotorEnable(); }
     @Override public void setMotorDisable() { motor.setMotorDisable(); }

@@ -20,25 +20,14 @@ import org.firstinspires.ftc.teamcode.core.Robot;
 import org.firstinspires.ftc.teamcode.core.State;
 
 /**
- * Fluent builder for autonomous path-and-action sequences.
- *
- * <p>Typical usage:
- * <pre>{@code
- * builder.setStartPose(robot.follower.getPose())
- *        .setState(Magazine.IntakeState.IDLE)
- *        .buildPath(p -> p.addLine(scorePose))
- *        .action(robot.actions.shootAll());
- * }</pre>
- *
- * <p>Pending {@code setState}, {@code run}, and {@code actionAsync} calls are accumulated and
- * flushed into the prelude/during of the next real segment, so they cost zero extra ticks.
+ * Fluent builder for an autonomous sequence of paths, actions, and waits. Pending {@code setState},
+ * {@code run}, and {@code actionAsync} calls accumulate and flush into the prelude of the next
+ * real segment, so they cost zero extra scheduler ticks.
  */
 public class PathActionBuilder {
 
-    // ─── pending state, flushed to next segment ──────────────────────────────
-
     private final List<PathActionSegment> segments = new ArrayList<>();
-    /** Keyed by state class so multiple state enums on the same module don't overwrite each other. */
+    // Keyed by state class so two state enums on the same module don't clobber each other.
     private final Map<Class<? extends State>, State> pendingStates = new LinkedHashMap<>();
     private final List<Runnable> pendingRunnables = new ArrayList<>();
     private final List<Action> pendingDuringActions = new ArrayList<>();
@@ -58,7 +47,8 @@ public class PathActionBuilder {
     }
 
     public PathActionBuilder(Follower follower, LongSupplier clock) {
-        this.follower = follower; // null = late-bound to Robot.robot.follower at use time
+        // null follower = late-bind to Robot.robot.follower at use time.
+        this.follower = follower;
         this.clock = clock;
     }
 
@@ -66,24 +56,19 @@ public class PathActionBuilder {
         return follower != null ? follower : Robot.robot.follower;
     }
 
-    // ─── config ──────────────────────────────────────────────────────────────
-
     public PathActionBuilder setStartPose(Pose startPose) {
         lastPathEndPose = startPose;
         return this;
     }
 
-    /** Subsequent segments are skipped when {@code false}. Use to gate optional routines. */
+    /** Disable subsequent segments. Useful to gate optional routines without restructuring. */
     public PathActionBuilder setEnabled(boolean enabled) {
         if (!enabled) lastSegmentDisabled = true;
         this.enabled = enabled;
         return this;
     }
 
-    /**
-     * Queue states to be applied at the start of the next segment.
-     * @throws IllegalStateException if a state has no registered module
-     */
+    /** Queue states to apply at the start of the next real segment. */
     public PathActionBuilder setState(State... states) {
         for (State state : states) {
             Module module = state.getModule();
@@ -97,9 +82,6 @@ public class PathActionBuilder {
         return this;
     }
 
-    // ─── paths ───────────────────────────────────────────────────────────────
-
-    /** Linear transit to a target pose with the default 4-second path timeout. */
     public PathActionBuilder transitTo(Pose targetPose) {
         return transitTo(targetPose, 4000);
     }
@@ -117,7 +99,6 @@ public class PathActionBuilder {
         return this;
     }
 
-    /** Build a path starting from the last segment's end pose. */
     public PathActionBuilder buildPath(Consumer<IntegratedPathBuilder> body) {
         return buildPath(lastPathEndPose, body, null);
     }
@@ -138,7 +119,7 @@ public class PathActionBuilder {
         Pose safeStart = Objects.requireNonNull(
                 startPose, "startPose is required; call setStartPose() before buildPath");
 
-        // If we skipped a disabled segment that moved elsewhere, transit back first.
+        // If a disabled segment moved the expected start pose elsewhere, transit back first.
         if (enabled && lastSegmentDisabled
                 && lastPathEndPose != null
                 && !posesApproxEqual(safeStart, lastPathEndPose)) {
@@ -158,11 +139,9 @@ public class PathActionBuilder {
     }
 
     /**
-     * Schedule a path whose geometry is resolved at execution time. The body runs when
-     * the segment starts, so it can read live sensor data to target a pose.
-     *
-     * @param declaredEndPose best-guess end pose, used only to seed the next segment's
-     *                        default start pose; the actual path uses the live robot pose.
+     * Path whose geometry is resolved at execution time — body runs when the segment starts, so
+     * it can read live pose / sensor data. {@code declaredEndPose} only seeds the next segment's
+     * default start; the resolved path uses {@code follower.getPose()} at execution.
      */
     public PathActionBuilder buildPathDeferred(Pose declaredEndPose, Consumer<IntegratedPathBuilder> body) {
         if (enabled) lastPathEndPose = declaredEndPose;
@@ -183,37 +162,24 @@ public class PathActionBuilder {
         return this;
     }
 
-    // ─── actions ─────────────────────────────────────────────────────────────
-
-    /** Run a blocking action. The scheduler waits for it to complete before advancing. */
+    /** Blocking action; scheduler waits for it to complete before advancing. */
     public PathActionBuilder action(Action action) {
         segments.add(buildActionSegment(Collections.singletonList(action)));
         return this;
     }
 
-    /**
-     * Queue a fire-and-forget action that launches at the start of the next real segment
-     * (path, await, delay, or blocking action) with zero loop overhead. Despite the name,
-     * the action is <em>not</em> dispatched immediately — it's stored and emitted with
-     * the next segment's prelude.
-     */
+    /** Queue a fire-and-forget action that emits with the next real segment's prelude. */
     public PathActionBuilder actionAsync(Action action) {
         pendingDuringActions.add(action);
         return this;
     }
 
-    /**
-     * Queue synchronous code to run at the start of the next real segment, alongside any
-     * pending {@code setState()} and {@code actionAsync()} calls.
-     */
+    /** Queue synchronous code to run at the start of the next real segment. */
     public PathActionBuilder run(Runnable code) {
         pendingRunnables.add(code);
         return this;
     }
 
-    // ─── waiting ─────────────────────────────────────────────────────────────
-
-    /** Wait up to {@code timeoutMs} for {@code condition} to return true. */
     public PathActionBuilder await(Callable<Boolean> condition, int timeoutMs) {
         segments.add(new PathActionSegment.Builder()
                 .continueConditions(Collections.singletonList(condition))
@@ -227,12 +193,10 @@ public class PathActionBuilder {
         return this;
     }
 
-    /** Wait indefinitely for {@code condition} to return true. */
     public PathActionBuilder await(Callable<Boolean> condition) {
         return await(condition, Integer.MAX_VALUE);
     }
 
-    /** Pause for {@code delayMs} before advancing. */
     public PathActionBuilder delay(int delayMs) {
         segments.add(new PathActionSegment.Builder()
                 .preludeRunnables(drainPendingRunnables())
@@ -244,25 +208,21 @@ public class PathActionBuilder {
         return this;
     }
 
-    // ─── overrides ───────────────────────────────────────────────────────────
-
-    /** Register a condition that, when true, cancels the sequence and runs {@code handler}. */
+    /** Cancel-and-handle on a condition. Replaces any prior override. */
     public PathActionBuilder setOverride(Callable<Boolean> condition, Runnable handler) {
         this.overrideCondition = condition;
         this.overrideHandler = handler;
         return this;
     }
 
-    /** Shorthand for a time-based override using the OpMode game timer. */
     public PathActionBuilder setTimeOverride(int timeMs, Runnable handler) {
         return setOverride(() -> Robot.robot.opMode.getGameTimer().milliseconds() >= timeMs, handler);
     }
 
-    // ─── build ───────────────────────────────────────────────────────────────
-
     @CheckResult
     public PathActionScheduler build() {
-        // Trailing flush: anything still pending becomes a final no-op segment.
+        // Trailing flush: anything still pending becomes a final no-op segment so the scheduler
+        // actually runs it.
         if (!pendingRunnables.isEmpty() || !pendingDuringActions.isEmpty() || !pendingStates.isEmpty()) {
             segments.add(new PathActionSegment.Builder()
                     .preludeRunnables(drainPendingRunnables())
@@ -276,8 +236,6 @@ public class PathActionBuilder {
         if (overrideCondition != null) scheduler.setOverride(overrideCondition, overrideHandler);
         return scheduler;
     }
-
-    // ─── helpers ─────────────────────────────────────────────────────────────
 
     private List<State> drainPendingStates() {
         List<State> out = new ArrayList<>(pendingStates.values());

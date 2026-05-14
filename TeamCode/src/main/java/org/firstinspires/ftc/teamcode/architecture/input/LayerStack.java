@@ -31,8 +31,6 @@ public class LayerStack<T> {
         update();
     }
 
-    // ─── current layer ───────────────────────────────────────────────────────
-
     public T getLayer() { return currentLayer; }
 
     public void setLayer(T layer) {
@@ -52,8 +50,6 @@ public class LayerStack<T> {
         if (gamepad == null || currentLayer == null) return false;
         return gamepad.equals(layers.get(currentLayer));
     }
-
-    // ─── layer management ────────────────────────────────────────────────────
 
     public Set<T> getAvailableLayers() { return layers.keySet(); }
     public boolean hasLayer(T layer) { return layers.containsKey(layer); }
@@ -77,8 +73,6 @@ public class LayerStack<T> {
         }
         return removed;
     }
-
-    // ─── physical state propagation ──────────────────────────────────────────
 
     /** Push the active/atRest state into every underlying gamepad. */
     public void update() {

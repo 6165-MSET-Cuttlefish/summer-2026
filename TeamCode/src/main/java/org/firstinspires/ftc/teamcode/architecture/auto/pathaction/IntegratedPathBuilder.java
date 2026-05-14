@@ -19,8 +19,8 @@ import org.firstinspires.ftc.teamcode.core.Actions;
 import org.firstinspires.ftc.teamcode.core.Robot;
 
 /**
- * Thin fluent wrapper around Pedro's {@link PathBuilder} that also collects "during" actions
- * to be launched alongside the path by the scheduler.
+ * Fluent wrapper around Pedro's {@link PathBuilder} that also collects "during" actions for the
+ * scheduler to launch alongside the path.
  */
 public class IntegratedPathBuilder {
     private final Pose startPose;
@@ -30,7 +30,6 @@ public class IntegratedPathBuilder {
     private boolean holdEnd = true;
     private Double holdAtDistance = null;
 
-    /** Constructor used by the auto framework — pulls a fresh PathBuilder from the singleton follower. */
     IntegratedPathBuilder(Pose startPose) {
         this(startPose, Robot.robot.follower.pathBuilder());
     }
@@ -42,8 +41,6 @@ public class IntegratedPathBuilder {
     }
 
     public Pose getStartPose() { return startPose; }
-
-    // ─── path geometry ───────────────────────────────────────────────────────
 
     public IntegratedPathBuilder addLine(Pose endPose) {
         pedroBuilder.addPath(new BezierLine(lastPose, endPose));
@@ -106,8 +103,6 @@ public class IntegratedPathBuilder {
         if (points.length > 0) lastPose = points[points.length - 1];
         return this;
     }
-
-    // ─── heading interpolation ───────────────────────────────────────────────
 
     public IntegratedPathBuilder setConstantHeading(double heading) {
         pedroBuilder.setConstantHeadingInterpolation(heading);
@@ -181,8 +176,6 @@ public class IntegratedPathBuilder {
         return this;
     }
 
-    // ─── braking / constraints ───────────────────────────────────────────────
-
     public IntegratedPathBuilder setBrakingStrength(int strength) {
         pedroBuilder.setBrakingStrength(strength);
         return this;
@@ -253,8 +246,6 @@ public class IntegratedPathBuilder {
         return this;
     }
 
-    // ─── callbacks ───────────────────────────────────────────────────────────
-
     public IntegratedPathBuilder addTemporalCallback(double time, Runnable runnable) {
         pedroBuilder.addTemporalCallback(time, runnable);
         return this;
@@ -294,8 +285,6 @@ public class IntegratedPathBuilder {
         pedroBuilder.addLoopedCallback(callback);
         return this;
     }
-
-    // ─── during actions / hold-end ───────────────────────────────────────────
 
     public IntegratedPathBuilder during(Action action) {
         duringActions.add(action);
@@ -344,8 +333,6 @@ public class IntegratedPathBuilder {
         this.holdAtDistance = distance;
         return this;
     }
-
-    // ─── package-private accessors used by the scheduler ─────────────────────
 
     PathChain buildPath() { return pedroBuilder.build(); }
     List<Action> getDuringActions() { return new ArrayList<>(duringActions); }

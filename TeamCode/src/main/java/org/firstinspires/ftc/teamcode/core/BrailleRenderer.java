@@ -2,11 +2,8 @@ package org.firstinspires.ftc.teamcode.core;
 
 /**
  * Renders a 2D pixel grid as Unicode Braille (U+2800..U+28FF) in HTML so the Driver Station can
- * display a tiny field map. Each Braille cell packs 2×4 pixels.
- *
- * <p>Coordinates are inches on a 144" field; the renderer scales them to the configured pixel
- * grid. {@link #snapshot()}/{@link #restore()} let the caller draw a static field once and then
- * cheaply restore that baseline before drawing transient overlays (robot, balls).
+ * show a tiny field map. Each Braille glyph packs 2×4 pixels. {@link #snapshot()} /
+ * {@link #restore()} lets callers draw a static field once and cheaply reset before each frame.
  */
 public class BrailleRenderer {
 
@@ -32,13 +29,7 @@ public class BrailleRenderer {
         this.cellColors = new String[(height + 3) / 4][(width + 1) / 2];
     }
 
-    // ─── high-level draw ─────────────────────────────────────────────────────
-
-    /**
-     * Draw a generic field background: outer border + a tile grid (FTC field is 6×6 tiles).
-     * Game-specific layouts (goals, zones, marks) belong in a season-side subclass that calls
-     * {@code super.drawFieldLayout()} and then layers its own primitives on top.
-     */
+    /** Generic field background — border plus 6×6 tile grid. Game-side subclasses can layer on. */
     public void drawFieldLayout() {
         clear();
 
@@ -46,10 +37,8 @@ public class BrailleRenderer {
         int h = height - 1;
         String grid = "#666666";
 
-        // Outer border.
         drawRect(0, 0, w, h);
 
-        // 6-tile grid (FTC fields are 6×6 tiles).
         int tiles = 6;
         for (int i = 1; i < tiles; i++) {
             int x = snapX((int) ((i / (double) tiles) * w));
@@ -71,15 +60,13 @@ public class BrailleRenderer {
         drawLine(px, py, endX, endY, color);
     }
 
-    /** Draw a small marker (game-element scale, ~5" diameter) at field coordinates. */
+    /** Small marker at field coordinates (~5" diameter — game-element scale). */
     public void drawPoint(double xInches, double yInches, String color) {
         int px = toPxX(xInches);
         int py = toPxY(yInches);
         int r = Math.max(1, toPxX(5 / 2.0));
         drawCircle(px, py, r, color);
     }
-
-    // ─── snapshot / clear ────────────────────────────────────────────────────
 
     public void clear() {
         for (int y = 0; y < height; y++) {
@@ -90,7 +77,6 @@ public class BrailleRenderer {
         }
     }
 
-    /** Save the current pixel/color state so it can be cheaply restored later. */
     public void snapshot() {
         snapshotPixels = new boolean[height][width];
         snapshotColors = new String[cellColors.length][cellColors[0].length];
@@ -100,15 +86,12 @@ public class BrailleRenderer {
             System.arraycopy(cellColors[y], 0, snapshotColors[y], 0, cellColors[0].length);
     }
 
-    /** Restore the last snapshot, replacing the current pixel/color state. */
     public void restore() {
         for (int y = 0; y < height; y++)
             System.arraycopy(snapshotPixels[y], 0, pixels[y], 0, width);
         for (int y = 0; y < cellColors.length; y++)
             System.arraycopy(snapshotColors[y], 0, cellColors[y], 0, cellColors[0].length);
     }
-
-    // ─── primitives ──────────────────────────────────────────────────────────
 
     public void setPixel(int x, int y, String color) {
         int py = (height - 1) - y;
@@ -198,8 +181,6 @@ public class BrailleRenderer {
         }
     }
 
-    // ─── HTML output ─────────────────────────────────────────────────────────
-
     public String renderHtml() {
         int cellRows = (height + 3) / 4;
         int cellCols = (width + 1) / 2;
@@ -225,35 +206,6 @@ public class BrailleRenderer {
         return out.toString();
     }
 
-    // ─── debug ───────────────────────────────────────────────────────────────
-
-    public void drawDebugGrid() {
-        for (int y = 0; y < height; y += 4) {
-            for (int x = 0; x < width; x += 2) pixels[y][x] = true;
-        }
-    }
-
-    public String debugBrailleColumn(int x) {
-        StringBuilder sb = new StringBuilder();
-        int cellX = x / 2;
-        for (int y = 0; y < height; y += 4) {
-            char b = braille(cellX * 2, y);
-            sb.append("y=").append(y)
-              .append(" code=").append((int) b - 0x2800)
-              .append(" char=").append(b).append('\n');
-        }
-        return sb.toString();
-    }
-
-    public String debugColumn(int x) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("x=").append(x).append(": ");
-        for (int py = 0; py < height; py++) sb.append(pixels[py][x] ? "1" : "0");
-        return sb.toString();
-    }
-
-    // ─── internals ───────────────────────────────────────────────────────────
-
     private int toPxX(double inches) { return (int) Math.round(inches * scaleX); }
     private int toPxY(double inches) { return (int) Math.round(inches * scaleY); }
 
@@ -275,6 +227,7 @@ public class BrailleRenderer {
         return (char) (0x2800 + code);
     }
 
+    /** Snap x to an even pixel so it aligns with the 2-wide Braille glyph boundary. */
     private static int snapX(int x) {
         return (x / 2) * 2;
     }
