@@ -34,24 +34,22 @@ public class BrailleRenderer {
 
     // ─── high-level draw ─────────────────────────────────────────────────────
 
+    /**
+     * Draw a generic field background: outer border + a tile grid (FTC field is 6×6 tiles).
+     * Game-specific layouts (goals, zones, marks) belong in a season-side subclass that calls
+     * {@code super.drawFieldLayout()} and then layers its own primitives on top.
+     */
     public void drawFieldLayout() {
-        int w = width - 1;
-        int h = height - 1;
-
-        int midX = snapX(w / 2);
-        int midY = h / 2;
-
-        String grid  = "#666666";
-        String field = "#bbbbbb";
-        String red   = "#ff4444";
-        String blue  = "#448aff";
-
         clear();
 
-        // Outer border
+        int w = width - 1;
+        int h = height - 1;
+        String grid = "#666666";
+
+        // Outer border.
         drawRect(0, 0, w, h);
 
-        // Background grid (6 divisions)
+        // 6-tile grid (FTC fields are 6×6 tiles).
         int tiles = 6;
         for (int i = 1; i < tiles; i++) {
             int x = snapX((int) ((i / (double) tiles) * w));
@@ -59,61 +57,6 @@ public class BrailleRenderer {
             drawLine(x, 0, x, h, grid);
             drawLine(0, y, w, y, grid);
         }
-
-        // Zone top
-        drawLine(0, h, midX, midY, field);
-        drawLine(w, h, midX, midY, field);
-
-        // Zone bottom
-        int zoneX = snapX(w / 3);
-        int zoneXR = snapX(w - w / 3);
-        drawLine(zoneX, 0, midX, h / 6, field);
-        drawLine(midX, h / 6, zoneXR, 0, field);
-
-        // Goals
-        int goalInner  = snapX(w / 24);
-        int goalOuter  = snapX(w / 6);
-        int goalInnerR = w - goalInner;
-        int goalOuterR = w - goalOuter;
-        drawLine(goalInner,  h * 5 / 6, goalOuter,  h, blue);
-        drawLine(goalInner,  h,         goalOuter,  h, blue);
-        drawLine(goalInnerR, h * 5 / 6, goalOuterR, h, red);
-        drawLine(goalInnerR, h,         goalOuterR, h, red);
-
-        // Classifier
-        drawLine(goalInner,  h, goalInner,  midY, field);
-        drawLine(goalInnerR, h, goalInnerR, midY, field);
-
-        // Tunnel
-        drawLine(goalInner,  midY, goalInner,  h / 6, red);
-        drawLine(goalInnerR, midY, goalInnerR, h / 6, blue);
-
-        // Spike marks
-        int spikeX  = snapX((int) ((1.0 / 6.0) * w));
-        int spikeXR = snapX((int) ((5.0 / 6.0) * w));
-        int spikeW  = snapX((int) ((15.0 / 24.0) * (w / 6)));
-        int spikeHalf = spikeW / 2;
-        drawHorizontal(spikeX  - spikeHalf, spikeX  + spikeHalf, h / 4,      field);
-        drawHorizontal(spikeX  - spikeHalf, spikeX  + spikeHalf, h * 5 / 12, field);
-        drawHorizontal(spikeX  - spikeHalf, spikeX  + spikeHalf, h * 7 / 12, field);
-        drawHorizontal(spikeXR - spikeHalf, spikeXR + spikeHalf, h / 4,      field);
-        drawHorizontal(spikeXR - spikeHalf, spikeXR + spikeHalf, h * 5 / 12, field);
-        drawHorizontal(spikeXR - spikeHalf, spikeXR + spikeHalf, h * 7 / 12, field);
-
-        // HP zones
-        int hpW  = snapX(w / 6);
-        int hpWR = snapX((int) ((5.0 / 6.0) * w));
-        int hpH  = h / 6;
-        drawRect(0,    0, hpW,      hpH, field);
-        drawRect(hpWR, 0, w - hpWR, hpH, field);
-
-        // Endgame boxes
-        int grid2 = snapX((int) ((2.0 / 6.0) * w));
-        int grid4 = snapX((int) ((4.0 / 6.0) * w));
-        int ebW   = snapX((int) ((3.0 / 24.0) * w));
-        int ebH   = h / 8;
-        drawRect(grid2 - ebW, h / 6, ebW, ebH, red);
-        drawRect(grid4,       h / 6, ebW, ebH, blue);
     }
 
     public void drawRobot(double centerXInches, double centerYInches, double headingRadians, String color) {
@@ -128,15 +71,11 @@ public class BrailleRenderer {
         drawLine(px, py, endX, endY, color);
     }
 
-    public void drawArtifact(double xInches, double yInches, String color) {
+    /** Draw a small marker (game-element scale, ~5" diameter) at field coordinates. */
+    public void drawPoint(double xInches, double yInches, String color) {
         int px = toPxX(xInches);
         int py = toPxY(yInches);
         int r = Math.max(1, toPxX(5 / 2.0));
-        drawCircle(px, py, r, color);
-    }
-
-    public void drawArtifactPx(int px, int py, String color) {
-        int r = Math.max(1, (int) (width * 2.5 / 144.0));
         drawCircle(px, py, r, color);
     }
 
