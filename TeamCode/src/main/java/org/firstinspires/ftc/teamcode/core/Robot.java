@@ -10,8 +10,9 @@ import com.qualcomm.hardware.gobilda.GoBildaPinpointDriver;
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.Pose2D;
-import org.firstinspires.ftc.teamcode.architecture.auto.Constants;
 import org.firstinspires.ftc.teamcode.architecture.auto.FieldConfig;
+import org.firstinspires.ftc.teamcode.architecture.auto.PedroSetup;
+import org.firstinspires.ftc.teamcode.architecture.auto.RobotHardwareConfig;
 import org.firstinspires.ftc.teamcode.architecture.auto.pathaction.PathActionScheduler;
 
 /**
@@ -61,7 +62,7 @@ public abstract class Robot {
     private void initializeFollower(boolean preservePosition, Robot previousRobot) {
         if (preservePosition && previousRobot != null && previousRobot.follower != null) {
             GoBildaPinpointDriver pinpoint = opMode.hardwareMap.get(
-                    GoBildaPinpointDriver.class, "pinpoint");
+                    GoBildaPinpointDriver.class, RobotHardwareConfig.PINPOINT_NAME);
             pinpoint.update();
             Pose2D rawPose = pinpoint.getPosition();
             Pose livePose = new Pose(
@@ -69,10 +70,10 @@ public abstract class Robot {
                     rawPose.getY(DistanceUnit.INCH),
                     rawPose.getHeading(AngleUnit.RADIANS));
 
-            follower = Constants.createFollower(opMode.hardwareMap);
+            follower = PedroSetup.createFollower(opMode.hardwareMap);
             follower.setPose(livePose);
         } else {
-            follower = Constants.createFollower(opMode.hardwareMap);
+            follower = PedroSetup.createFollower(opMode.hardwareMap);
             follower.setPose(new Pose(72, FieldConfig.fieldWidthInches - 10, Math.toRadians(90)));
         }
     }
