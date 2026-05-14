@@ -38,8 +38,10 @@ public class EnhancedBooleanSupplier {
         previous = current;
         long time = System.nanoTime();
         doubleClickDetected = false;
+        // Read the source once — supplier may be a chained predicate that's not free to call twice.
+        boolean raw = booleanSupplier.getAsBoolean();
 
-        if (!current && booleanSupplier.getAsBoolean()) {
+        if (!current && raw) {
             if (time - timeMarker >= risingDebounce) {
                 current = true;
                 toggleTrue = !toggleTrue;
@@ -51,7 +53,7 @@ public class EnhancedBooleanSupplier {
                 timeMarker = time;
             }
 
-        } else if (current && !booleanSupplier.getAsBoolean()) {
+        } else if (current && !raw) {
             if (time - timeMarker >= fallingDebounce) {
                 current = false;
                 toggleFalse = !toggleFalse;

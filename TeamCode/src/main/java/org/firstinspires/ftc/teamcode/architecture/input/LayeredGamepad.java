@@ -32,36 +32,36 @@ public class LayeredGamepad<T> {
         if (layerStack == null) throw new IllegalArgumentException("layerStack cannot be null");
         this.layerStack = layerStack;
 
-        leftStickX  = mappedDouble(CustomGamepad::getLeftStickX);
-        leftStickY  = mappedDouble(CustomGamepad::getLeftStickY);
-        rightStickX = mappedDouble(CustomGamepad::getRightStickX);
-        rightStickY = mappedDouble(CustomGamepad::getRightStickY);
-        leftTrigger  = mappedDouble(CustomGamepad::getLeftTrigger);
-        rightTrigger = mappedDouble(CustomGamepad::getRightTrigger);
+        leftStickX  = mappedDouble(cg -> cg.leftStickX);
+        leftStickY  = mappedDouble(cg -> cg.leftStickY);
+        rightStickX = mappedDouble(cg -> cg.rightStickX);
+        rightStickY = mappedDouble(cg -> cg.rightStickY);
+        leftTrigger  = mappedDouble(cg -> cg.leftTrigger);
+        rightTrigger = mappedDouble(cg -> cg.rightTrigger);
 
-        a = mappedBool(CustomGamepad::getA);
-        b = mappedBool(CustomGamepad::getB);
-        x = mappedBool(CustomGamepad::getX);
-        y = mappedBool(CustomGamepad::getY);
+        a = mappedBool(cg -> cg.a);
+        b = mappedBool(cg -> cg.b);
+        x = mappedBool(cg -> cg.x);
+        y = mappedBool(cg -> cg.y);
 
-        dpadUp    = mappedBool(CustomGamepad::getDpadUp);
-        dpadDown  = mappedBool(CustomGamepad::getDpadDown);
-        dpadLeft  = mappedBool(CustomGamepad::getDpadLeft);
-        dpadRight = mappedBool(CustomGamepad::getDpadRight);
+        dpadUp    = mappedBool(cg -> cg.dpadUp);
+        dpadDown  = mappedBool(cg -> cg.dpadDown);
+        dpadLeft  = mappedBool(cg -> cg.dpadLeft);
+        dpadRight = mappedBool(cg -> cg.dpadRight);
 
-        leftBumper  = mappedBool(CustomGamepad::getLeftBumper);
-        rightBumper = mappedBool(CustomGamepad::getRightBumper);
+        leftBumper  = mappedBool(cg -> cg.leftBumper);
+        rightBumper = mappedBool(cg -> cg.rightBumper);
 
-        start = mappedBool(CustomGamepad::getStart);
-        back  = mappedBool(CustomGamepad::getBack);
-        guide = mappedBool(CustomGamepad::getGuide);
+        start = mappedBool(cg -> cg.start);
+        back  = mappedBool(cg -> cg.back);
+        guide = mappedBool(cg -> cg.guide);
 
-        leftStickButton  = mappedBool(CustomGamepad::getLeftStickButton);
-        rightStickButton = mappedBool(CustomGamepad::getRightStickButton);
+        leftStickButton  = mappedBool(cg -> cg.leftStickButton);
+        rightStickButton = mappedBool(cg -> cg.rightStickButton);
 
-        touchpad         = mappedBool(CustomGamepad::getTouchpad);
-        touchpadFinger1X = mappedDouble(CustomGamepad::getTouchpadFinger1X);
-        touchpadFinger1Y = mappedDouble(CustomGamepad::getTouchpadFinger1Y);
+        touchpad         = mappedBool(cg -> cg.touchpad);
+        touchpadFinger1X = mappedDouble(cg -> cg.touchpadFinger1X);
+        touchpadFinger1Y = mappedDouble(cg -> cg.touchpadFinger1Y);
     }
 
     private EnhancedBooleanSupplier mappedBool(Function<CustomGamepad, EnhancedBooleanSupplier> getter) {
