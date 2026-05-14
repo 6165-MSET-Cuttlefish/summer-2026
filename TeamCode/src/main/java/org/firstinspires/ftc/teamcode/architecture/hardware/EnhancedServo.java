@@ -1,0 +1,94 @@
+package org.firstinspires.ftc.teamcode.architecture.hardware;
+
+import com.qualcomm.robotcore.hardware.HardwareMap;
+import com.qualcomm.robotcore.hardware.PwmControl;
+import com.qualcomm.robotcore.hardware.Servo;
+import com.qualcomm.robotcore.hardware.ServoController;
+import com.qualcomm.robotcore.hardware.ServoImplEx;
+
+/**
+ * Enhanced Servo wrapper with position caching and bounds. Configure by chaining:
+ * {@code new EnhancedServo(servo).withCachingTolerance(0.001).withPositionBounds(0.1, 0.9)}.
+ *
+ * <p>Servos run on PWM and don't need voltage compensation, so this is the simpler cousin of
+ * {@link EnhancedMotor} / {@link EnhancedCRServo}.
+ */
+public class EnhancedServo implements Servo, PwmControl {
+    private final ServoImplEx servo;
+    private final WriteCache cache = new WriteCache();
+
+    public EnhancedServo(ServoImplEx servo) {
+        this.servo = servo;
+        // Servo positions are 0..1, not -1..1 like motor power.
+        cache.min = 0.0;
+        cache.max = 1.0;
+    }
+
+    public EnhancedServo(HardwareMap hardwareMap, String name) {
+        this(hardwareMap.get(ServoImplEx.class, name));
+    }
+
+    // ─── caching / bounds configuration ──────────────────────────────────────
+
+    public EnhancedServo withCachingTolerance(double tolerance) {
+        cache.tolerance = tolerance;
+        return this;
+    }
+
+    public EnhancedServo withPositionBounds(double min, double max) {
+        cache.min = min;
+        cache.max = max;
+        return this;
+    }
+
+    // ─── setPosition with caching ────────────────────────────────────────────
+
+    @Override
+    public void setPosition(double position) {
+        double corrected = cache.clamp(position);
+        if (cache.shouldWrite(corrected)) {
+            cache.store(corrected);
+            servo.setPosition(corrected);
+        }
+    }
+
+    /** Set position directly without caching. Useful for testing. */
+    public void setPositionRaw(double position) {
+        double corrected = cache.clamp(position);
+        cache.store(corrected);
+        servo.setPosition(corrected);
+    }
+
+    public void setCachingTolerance(double tolerance) {
+        cache.tolerance = Math.max(0.0, Math.min(1.0, tolerance));
+    }
+
+    public double getCachingTolerance() { return cache.tolerance; }
+    public ServoImplEx getUnderlying() { return servo; }
+    public double getCachedPosition() { return cache.cached; }
+
+    // ─── Servo / PwmControl interface (forwarded) ────────────────────────────
+
+    @Override public ServoController getController() { return servo.getController(); }
+    @Override public int getPortNumber() { return servo.getPortNumber(); }
+
+    @Override public Direction getDirection() { return servo.getDirection(); }
+    @Override public void setDirection(Direction direction) { servo.setDirection(direction); }
+
+    @Override public void scaleRange(double min, double max) { servo.scaleRange(min, max); }
+
+    @Override public Manufacturer getManufacturer() { return servo.getManufacturer(); }
+    @Override public String getDeviceName() { return servo.getDeviceName(); }
+    @Override public String getConnectionInfo() { return servo.getConnectionInfo(); }
+    @Override public int getVersion() { return servo.getVersion(); }
+    @Override public void resetDeviceConfigurationForOpMode() { servo.resetDeviceConfigurationForOpMode(); }
+    @Override public void close() { servo.close(); }
+
+    @Override public double getPosition() { return servo.getPosition(); }
+
+    @Override public void setPwmRange(PwmRange range) { servo.setPwmRange(range); }
+    @Override public PwmRange getPwmRange() { return servo.getPwmRange(); }
+    @Override public void setPwmEnable() { servo.setPwmEnable(); }
+    @Override public void setPwmDisable() { servo.setPwmDisable(); }
+    @Override public boolean isPwmEnabled() { return servo.isPwmEnabled(); }
+}

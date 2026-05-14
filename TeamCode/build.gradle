@@ -60,6 +60,12 @@ android {
         targetCompatibility JavaVersion.VERSION_1_8
     }
 
+    // Match Kotlin's JVM target to Java's. Without this, Kotlin defaults to whatever
+    // JDK Gradle is running on (e.g. 21) and the Java/Kotlin compile tasks disagree.
+    kotlinOptions {
+        jvmTarget = '1.8'
+    }
+
     buildFeatures {
         buildConfig = true
     }
