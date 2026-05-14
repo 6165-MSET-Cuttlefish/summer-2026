@@ -141,6 +141,12 @@ public abstract class EnhancedOpMode extends OpMode {
 
     @Override
     public final void init() {
+        // Sloth hot-reloads and back-to-back opmode runs leave stale framework state behind:
+        // the State→Module map and the Actions active list both live in static fields. Rebuild
+        // both before this opmode's modules instantiate.
+        StateRegistry.clearModuleBindings();
+        Actions.cancelAll();
+
         configureBulkCaching();
         voltageSensor = hardwareMap.voltageSensor.iterator().next();
 
@@ -293,6 +299,10 @@ public abstract class EnhancedOpMode extends OpMode {
     public final void stop() {
         running = false;
         Actions.shutdown();
+        // Reset any pending auto sequence so the next opmode starts clean.
+        if (robot != null && robot.pathActionScheduler != null) {
+            robot.pathActionScheduler.cancelAll();
+        }
         onEnd();
     }
 

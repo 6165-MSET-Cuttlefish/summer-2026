@@ -134,38 +134,35 @@ public abstract class Module {
     }
 
     /**
-     * Transition to a new state. Returns true if the transition succeeded,
-     * false if blocked by guards or constraints.
+     * Transition to a new state. Returns true if the transition succeeded OR was a no-op
+     * because {@code newState} matches the current state of that class. Returns false only
+     * when no state of {@code newState}'s class is registered, or a guard blocks it.
      */
     public final boolean set(State newState) {
         for (int i = 0; i < states.size(); i++) {
             State current = states.get(i);
-            if (newState.getClass() == current.getClass() && !newState.equals(current)) {
-                // Check if transition is allowed by guards and constraints
-                if (!checkGuards(current, newState)) {
-                    return false;
-                }
+            if (newState.getClass() != current.getClass()) continue;
+            // Same-state set() is a successful no-op so callers can use the return value as
+            // "is this state class registered" rather than "did anything change".
+            if (newState.equals(current)) return true;
 
-                // Fire exit hook for the old state before transition
-                fireExitHooks(current);
+            if (!checkGuards(current, newState)) return false;
 
-                // Track state history for debugging
-                stateHistory.addLast(current);
-                if (stateHistory.size() > maxHistorySize) {
-                    stateHistory.pollFirst();
-                }
+            fireExitHooks(current);
 
-                states.set(i, newState);
-                stateMap.put(newState.getClass(), newState);
-                newState.setModule(this);
-                stateTimer.reset();
-
-                // Fire enter hook for the new state after transition
-                fireEnterHooks(newState);
-
-                onStateChange();
-                return true;
+            stateHistory.addLast(current);
+            if (stateHistory.size() > maxHistorySize) {
+                stateHistory.pollFirst();
             }
+
+            states.set(i, newState);
+            stateMap.put(newState.getClass(), newState);
+            newState.setModule(this);
+            stateTimer.reset();
+
+            fireEnterHooks(newState);
+            onStateChange();
+            return true;
         }
         return false;
     }
