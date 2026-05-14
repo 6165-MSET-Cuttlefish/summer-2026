@@ -10,9 +10,6 @@ import java.util.List;
 import java.util.Map;
 import org.firstinspires.ftc.robotcore.external.Telemetry;
 
-import static org.firstinspires.ftc.teamcode.core.OptimizationToggles.optimizeProfilerScopeKeys;
-import static org.firstinspires.ftc.teamcode.core.OptimizationToggles.optimizeStateLookupMap;
-
 /**
  * Base class for robot subsystem modules with state machine support.
  * Extend this class and implement initStates(), read(), and write().
@@ -36,7 +33,6 @@ public abstract class Module {
     private boolean telemetryEnabled = true;
     private boolean writeEnabled = true;
     private String name;
-    /** Precomputed profiler scope keys so the hot loop doesn't concat strings. */
     private String readScopeKey;
     private String writeScopeKey;
 
@@ -51,9 +47,7 @@ public abstract class Module {
         this.writeScopeKey = "write." + this.name;
     }
 
-    /** Precomputed scope key for read profiling. Use when {@code optimizeProfilerScopeKeys} is on. */
     public final String getReadScopeKey() { return readScopeKey; }
-    /** Precomputed scope key for write profiling. Use when {@code optimizeProfilerScopeKeys} is on. */
     public final String getWriteScopeKey() { return writeScopeKey; }
 
     /** Initialize states for this module. Call setStates() here. */
@@ -108,27 +102,17 @@ public abstract class Module {
     }
 
     /**
-     * Get the current state instance of the given type.
-     * @throws IllegalArgumentException if no state of that type exists
+     * Get the current state instance of the given type. Throws if no state of that type is
+     * registered. Map lookup is O(1) for the common case (exact class key); the list scan
+     * fallback preserves isInstance() semantics for subclass-keyed lookups.
      */
     @SuppressWarnings("unchecked")
     public final <T extends State> T get(Class<T> stateClass) {
-        if (optimizeStateLookupMap) {
-            State s = stateMap.get(stateClass);
-            if (s != null) return (T) s;
-            // Fall through to the list scan in case a subclass key was used; preserves the
-            // original isInstance() semantics without paying for it on the common path.
-            for (int i = 0; i < states.size(); i++) {
-                State candidate = states.get(i);
-                if (stateClass.isInstance(candidate)) return (T) candidate;
-            }
-            throw new IllegalArgumentException("No state of type: " + stateClass.getSimpleName());
-        }
-        // Retrieve the current state instance of the given type
-        for (State s : states) {
-            if (stateClass.isInstance(s)) {
-                return (T) s;
-            }
+        State s = stateMap.get(stateClass);
+        if (s != null) return (T) s;
+        for (int i = 0; i < states.size(); i++) {
+            State candidate = states.get(i);
+            if (stateClass.isInstance(candidate)) return (T) candidate;
         }
         throw new IllegalArgumentException("No state of type: " + stateClass.getSimpleName());
     }

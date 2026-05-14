@@ -5,7 +5,7 @@ import org.firstinspires.ftc.robotcore.external.Func;
 import org.firstinspires.ftc.robotcore.external.Telemetry;
 
 import static org.firstinspires.ftc.teamcode.core.HtmlFormatter.*;
-import static org.firstinspires.ftc.teamcode.core.OptimizationToggles.optimizeTelemetryLazyFormat;
+import static org.firstinspires.ftc.teamcode.core.OptimizationToggles.telemetryLazyFormat;
 
 /**
  * Telemetry implementation that fans out every call to two backends: the Driver Station
@@ -129,7 +129,7 @@ public class EnhancedTelemetry implements Telemetry {
 
     @Override
     public Item addData(String caption, String format, Object... args) {
-        if (optimizeTelemetryLazyFormat && !enableDSTelemetry && !enableDashboardTelemetry) {
+        if (telemetryLazyFormat && !enableDSTelemetry && !enableDashboardTelemetry) {
             return EMPTY_ITEM;
         }
         Item dsItem = enableDSTelemetry
@@ -143,7 +143,7 @@ public class EnhancedTelemetry implements Telemetry {
 
     @Override
     public Item addData(String caption, Object value) {
-        if (optimizeTelemetryLazyFormat && !enableDSTelemetry && !enableDashboardTelemetry) {
+        if (telemetryLazyFormat && !enableDSTelemetry && !enableDashboardTelemetry) {
             return EMPTY_ITEM;
         }
         Item dsItem = enableDSTelemetry

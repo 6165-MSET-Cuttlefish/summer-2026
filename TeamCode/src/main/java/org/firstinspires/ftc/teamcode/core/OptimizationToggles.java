@@ -2,75 +2,44 @@ package org.firstinspires.ftc.teamcode.core;
 
 import com.acmerobotics.dashboard.config.Config;
 
+/**
+ * Live-tunable perf knobs surfaced on FTC Dashboard. Every field here is consumed somewhere
+ * in the framework — verify before adding a new one. Defaults favor visibility (data shows
+ * up) over throughput; tighten for competition.
+ */
 @Config
-public class OptimizationToggles {
+public final class OptimizationToggles {
     private OptimizationToggles() {}
 
-    public static boolean optimizeDashboardRendering = true;
-    public static int optimizeDashboardEveryNLoops = 2;
-    public static boolean optimizeDashboardSkipFieldImage = true;
-    public static boolean optimizeDashboardSkipGrid = true;
-    public static boolean optimizeDashboardSkipPoseHistory = true;
-    public static int optimizeDashboardPoseHistoryEveryNLoops = 3;
+    // Dashboard packet send cadence. 1 = every loop. Bump for cheaper loops at the cost of
+    // jerkier dashboard rendering.
+    public static int dashboardEveryNLoops = 2;
 
-    public static boolean optimizeTelemetryCadence = false;
-    public static int optimizeTelemetryEveryNLoops = 1;
+    public static boolean dashboardSkipFieldImage = true;
+    public static boolean dashboardSkipGrid = true;
+    public static boolean dashboardSkipPoseHistory = true;
 
-    public static boolean optimizeBuildAutonomousSequenceOnceInInit = false;
-    public static boolean optimizeRenderVisualizationCadence = true;
-    public static int optimizeRenderVisualizationEveryNLoops = 2;
+    // When pose history is drawn, throttle further (it's the heaviest single draw).
+    public static int dashboardPoseHistoryEveryNLoops = 3;
 
-    public static boolean optimizeCurrentLimiterComputation = false;
-    public static int optimizeCurrentLimiterEveryNLoops = 2;
-    public static boolean optimizeCurrentLimiterTelemetry = false;
+    // Driver Station telemetry transmit cadence. 1 = every loop.
+    public static int telemetryEveryNLoops = 1;
 
-    public static boolean optimizeInputInvalidation = true;
-    public static boolean optimizeControlsTelemetryCadence = false;
-    public static int optimizeControlsTelemetryEveryNLoops = 1;
-    public static boolean optimizeRumbleCooldown = true;
-    public static long optimizeRumbleCooldownMs = 250;
+    // Skip the String.format + Item allocation on telemetry calls when both backends are off.
+    public static boolean telemetryLazyFormat = true;
 
-    public static boolean optimizeSensorCadence = false;
-    public static int optimizeDistanceSensorEveryNLoops = 2;
-    public static int optimizeColorSensorEveryNLoops = 2;
+    // Sort modules into telemetry order once at init. Safe iff Module.telemetryOrder() values
+    // don't change at runtime — the default is constant 0 and overrides are typically static.
+    public static boolean telemetrySortModulesOnce = true;
 
-    public static boolean optimizeLimelightDrawCadence = true;
-    public static int optimizeLimelightDrawEveryNLoops = 2;
-    public static boolean optimizeSuppressLimelightPoseLogs = true;
-    public static boolean optimizeObeliskLogSpam = true;
+    // Master enable for LoopProfiler. False = every profiler call short-circuits, no
+    // System.nanoTime reads, no map probes.
+    public static boolean profilerEnabled = true;
 
-    public static boolean optimizeObeliskLoopDelay = false;
-    public static long optimizeObeliskLoopDelayMs = 20;
+    // Default value of Robot.telemetryToggles.loopProfile at class load. The profile dump is
+    // verbose; opt in from FtcDashboard when actively tuning.
+    public static boolean loopProfileTelemetryByDefault = false;
 
-    // ── New toggles added in the loop-time optimization pass ─────────────────
-    // Each gates a specific change so it can be reverted independently from FtcDashboard.
-
-    /** Default Robot.telemetryToggles.loopProfile to false at class-load (still toggleable at runtime). */
-    public static boolean optimizeDisableLoopProfileTelemetryByDefault = false;
-
-    /** Apply caching tolerances to Magazine + Turret servos so identical positions skip the I2C write. */
-    public static boolean optimizeServoCachingTolerances = true;
-
-    /** Drivetrain.getMotorPowers() returns a cached double[4] instead of allocating each call. */
-    public static boolean optimizeMotorPowersCaching = true;
-
-    /** Module.get(stateClass) uses an O(1) Map lookup instead of an O(n) list scan. */
-    public static boolean optimizeStateLookupMap = true;
-
-    /** Throttle limelight.updateRobotOrientation to every N loops (each is a USB serial transaction). */
-    public static boolean optimizeLimelightHeadingUpdateCadence = true;
-    public static int optimizeLimelightHeadingUpdateEveryNLoops = 3;
-
-    /** Throttle Lynx hub current reads (each is an I2C round-trip per hub). */
-    public static boolean optimizeCurrentReadCadence = false;
-    public static int optimizeCurrentReadEveryNLoops = 3;
-
-    /** Skip String.format and ArrayList allocation in EnhancedTelemetry when both backends disabled. */
-    public static boolean optimizeTelemetryLazyFormat = false;
-
-    /** Sort the telemetry-ordered module list once at init instead of every loop. */
-    public static boolean optimizeTelemetryModuleSortOnce = false;
-
-    /** Use precomputed "read.<name>"/"write.<name>" profile keys instead of String concat each loop. */
-    public static boolean optimizeProfilerScopeKeys = true;
+    // Throttle Lynx-hub current reads (one I2C round-trip per hub). 1 = every loop.
+    public static int currentReadEveryNLoops = 1;
 }

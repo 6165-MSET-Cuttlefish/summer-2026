@@ -95,6 +95,6 @@ public abstract class Robot {
         public boolean voltage = true;
         public boolean current = false;
         /** Render per-section loop-time breakdown in dashboard telemetry. */
-        public boolean loopProfile = !OptimizationToggles.optimizeDisableLoopProfileTelemetryByDefault;
+        public boolean loopProfile = OptimizationToggles.loopProfileTelemetryByDefault;
     }
 }

@@ -51,8 +51,6 @@ public abstract class EnhancedOpMode extends OpMode {
     private int telemetryLoopCounter = 0;
 
     private final List<Module> modules = new ArrayList<>();
-    /** Cached telemetry-ordered modules built once after init when {@code optimizeTelemetryModuleSortOnce}
-     *  is on; null otherwise. */
     private List<Module> sortedTelemetryModules;
     private int currentReadLoopCounter = 0;
     private double cachedTotalCurrent = 0.0;
@@ -163,7 +161,7 @@ public abstract class EnhancedOpMode extends OpMode {
         // Modules are picked up via reflection on the OpMode + Robot field graph.
         autoDiscoverModules();
         initModules();
-        if (optimizeTelemetryModuleSortOnce) buildSortedTelemetryModules();
+        if (telemetrySortModulesOnce) buildSortedTelemetryModules();
         initialize();
 
         loopTimer.reset();
@@ -183,6 +181,8 @@ public abstract class EnhancedOpMode extends OpMode {
             return;
         }
 
+        // Pick up dashboard-side enable flips before the per-loop measurement begins.
+        profiler.enabled = profilerEnabled;
         profiler.start();
 
         clearBulkCaches();
@@ -245,6 +245,7 @@ public abstract class EnhancedOpMode extends OpMode {
             return;
         }
 
+        profiler.enabled = profilerEnabled;
         profiler.start();
 
         clearBulkCaches();
@@ -363,9 +364,8 @@ public abstract class EnhancedOpMode extends OpMode {
         }
     }
 
-    /** Modules sorted by {@link Module#telemetryOrder()} (stable). Used only for telemetry. */
     private List<Module> telemetryOrderedModules() {
-        if (optimizeTelemetryModuleSortOnce) {
+        if (telemetrySortModulesOnce) {
             if (sortedTelemetryModules == null) buildSortedTelemetryModules();
             return sortedTelemetryModules;
         }
@@ -383,9 +383,9 @@ public abstract class EnhancedOpMode extends OpMode {
     private void readModules() {
         for (int i = 0; i < modules.size(); i++) {
             Module m = modules.get(i);
-            profiler.beginScope("read");
+            long t = profiler.startScope();
             m.read();
-            profiler.endScope(optimizeProfilerScopeKeys ? m.getReadScopeKey() : "read." + m.getName());
+            profiler.endScope(m.getReadScopeKey(), t);
         }
     }
 
@@ -393,9 +393,9 @@ public abstract class EnhancedOpMode extends OpMode {
         for (int i = 0; i < modules.size(); i++) {
             Module m = modules.get(i);
             if (m.isWriteEnabled()) {
-                profiler.beginScope("write");
+                long t = profiler.startScope();
                 m.write();
-                profiler.endScope(optimizeProfilerScopeKeys ? m.getWriteScopeKey() : "write." + m.getName());
+                profiler.endScope(m.getWriteScopeKey(), t);
             }
         }
     }
@@ -439,12 +439,11 @@ public abstract class EnhancedOpMode extends OpMode {
     // ── Telemetry ────────────────────────────────────────────────────
 
     private void updateTelemetry() {
-        if (optimizeTelemetryCadence) {
-            int every = Math.max(1, optimizeTelemetryEveryNLoops);
-            if ((telemetryLoopCounter++ % every) != 0) {
-                telemetry.update();
-                return;
-            }
+        int every = Math.max(1, telemetryEveryNLoops);
+        if (every > 1 && (telemetryLoopCounter++ % every) != 0) {
+            // Skip the expensive build but still tick update() so the DS link stays warm.
+            telemetry.update();
+            return;
         }
 
         if (telemetry instanceof EnhancedTelemetry) {
@@ -504,43 +503,29 @@ public abstract class EnhancedOpMode extends OpMode {
     }
 
     protected void updateDashboard(Pose currentPose) {
-        if (!optimizeDashboardRendering) {
-            Canvas overlay = robot.packet.fieldOverlay();
-            overlay.setAlpha(0.4);
-            overlay.drawImage("/images/fieldcoordinates-pedro.png", 0, 0, 144, 144);
-            overlay.setAlpha(1);
-            overlay.drawGrid(0, 0, 144, 144, 7, 7);
-
-            FieldVisualization.drawRobot(currentPose);
-            FieldVisualization.drawPoseHistory(robot.follower.getPoseHistory());
-
-            FtcDashboard.getInstance().sendTelemetryPacket(robot.packet);
-            robot.packet = new TelemetryPacket(false);
-            return;
-        }
-
-        int every = Math.max(1, optimizeDashboardEveryNLoops);
-        if ((dashboardLoopCounter++ % every) != 0) {
+        int every = Math.max(1, dashboardEveryNLoops);
+        if (every > 1 && (dashboardLoopCounter++ % every) != 0) {
+            // Drop accumulated draws on skipped loops by replacing the packet wholesale.
             robot.packet = new TelemetryPacket(false);
             return;
         }
 
         Canvas overlay = robot.packet.fieldOverlay();
 
-        if (!optimizeDashboardSkipFieldImage) {
+        if (!dashboardSkipFieldImage) {
             overlay.setAlpha(0.4);
             overlay.drawImage("/images/fieldcoordinates-pedro.png", 0, 0, 144, 144);
             overlay.setAlpha(1);
         }
 
-        if (!optimizeDashboardSkipGrid) {
+        if (!dashboardSkipGrid) {
             overlay.drawGrid(0, 0, 144, 144, 7, 7);
         }
 
         FieldVisualization.drawRobot(currentPose);
 
-        if (!optimizeDashboardSkipPoseHistory) {
-            int poseEvery = Math.max(1, optimizeDashboardPoseHistoryEveryNLoops);
+        if (!dashboardSkipPoseHistory) {
+            int poseEvery = Math.max(1, dashboardPoseHistoryEveryNLoops);
             if ((dashboardPoseHistoryLoopCounter++ % poseEvery) == 0) {
                 FieldVisualization.drawPoseHistory(robot.follower.getPoseHistory());
             }
@@ -613,17 +598,10 @@ public abstract class EnhancedOpMode extends OpMode {
         return count > 0 ? sum / count : 0;
     }
 
-    /** Get the total current draw from all Lynx hubs in amps. */
+    /** Total current draw across all Lynx hubs, amps. Throttled by {@code currentReadEveryNLoops}. */
     public final double getTotalCurrent() {
-        if (!optimizeCurrentReadCadence) {
-            double total = 0;
-            for (LynxModule hub : lynxHubs) {
-                total += hub.getCurrent(CurrentUnit.AMPS);
-            }
-            return total;
-        }
-        int every = Math.max(1, optimizeCurrentReadEveryNLoops);
-        if (currentReadLoopCounter == 0) {
+        int every = Math.max(1, currentReadEveryNLoops);
+        if (every == 1 || currentReadLoopCounter == 0) {
             double total = 0;
             for (LynxModule hub : lynxHubs) {
                 total += hub.getCurrent(CurrentUnit.AMPS);
