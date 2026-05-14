@@ -1,4 +1,6 @@
-package org.firstinspires.ftc.teamcode.core;
+package org.firstinspires.ftc.teamcode.core.state;
+
+import org.firstinspires.ftc.teamcode.core.Module;
 
 import java.util.concurrent.ConcurrentHashMap;
 

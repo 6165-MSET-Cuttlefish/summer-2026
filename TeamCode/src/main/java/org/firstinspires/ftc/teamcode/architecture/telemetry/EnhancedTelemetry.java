@@ -1,11 +1,11 @@
-package org.firstinspires.ftc.teamcode.core;
+package org.firstinspires.ftc.teamcode.architecture.telemetry;
 
 import androidx.annotation.Nullable;
 import org.firstinspires.ftc.robotcore.external.Func;
 import org.firstinspires.ftc.robotcore.external.Telemetry;
 
-import static org.firstinspires.ftc.teamcode.core.HtmlFormatter.*;
-import static org.firstinspires.ftc.teamcode.core.OptimizationToggles.telemetryLazyFormat;
+import static org.firstinspires.ftc.teamcode.architecture.telemetry.HtmlFormatter.*;
+import static org.firstinspires.ftc.teamcode.architecture.diagnostics.OptimizationToggles.telemetryLazyFormat;
 
 /**
  * Fan-out telemetry: every call goes to the Driver Station (HTML-formatted) and FTC Dashboard

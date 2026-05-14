@@ -9,6 +9,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.firstinspires.ftc.robotcore.external.Telemetry;
+import org.firstinspires.ftc.teamcode.architecture.telemetry.EnhancedTelemetry;
+import org.firstinspires.ftc.teamcode.core.action.Action;
+import org.firstinspires.ftc.teamcode.core.state.State;
 
 /**
  * Base class for robot subsystem modules. Subclasses implement {@link #initStates()},

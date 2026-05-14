@@ -17,12 +17,19 @@ import java.util.Map;
 import java.util.Set;
 import org.firstinspires.ftc.robotcore.external.navigation.CurrentUnit;
 import org.firstinspires.ftc.teamcode.architecture.auto.FieldVisualization;
+import org.firstinspires.ftc.teamcode.architecture.diagnostics.LoopProfiler;
 import org.firstinspires.ftc.teamcode.architecture.hardware.EnhancedCRServo;
 import org.firstinspires.ftc.teamcode.architecture.hardware.EnhancedMotor;
+import org.firstinspires.ftc.teamcode.architecture.telemetry.BrailleRenderer;
+import org.firstinspires.ftc.teamcode.architecture.telemetry.EnhancedTelemetry;
+import org.firstinspires.ftc.teamcode.architecture.telemetry.HtmlFormatter;
+import org.firstinspires.ftc.teamcode.core.action.Action;
+import org.firstinspires.ftc.teamcode.core.action.Actions;
+import org.firstinspires.ftc.teamcode.core.state.StateRegistry;
 
 import static org.firstinspires.ftc.teamcode.core.Robot.telemetryToggles;
-import static org.firstinspires.ftc.teamcode.core.HtmlFormatter.*;
-import static org.firstinspires.ftc.teamcode.core.OptimizationToggles.*;
+import static org.firstinspires.ftc.teamcode.architecture.telemetry.HtmlFormatter.*;
+import static org.firstinspires.ftc.teamcode.architecture.diagnostics.OptimizationToggles.*;
 
 /**
  * Base OpMode with auto-discovered modules, voltage compensation, dual telemetry, and dashboard

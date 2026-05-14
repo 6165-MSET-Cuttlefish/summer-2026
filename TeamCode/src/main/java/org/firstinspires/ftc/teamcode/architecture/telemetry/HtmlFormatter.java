@@ -1,4 +1,4 @@
-package org.firstinspires.ftc.teamcode.core;
+package org.firstinspires.ftc.teamcode.architecture.telemetry;
 
 /**
  * HTML wrapping helpers for Driver Station telemetry. Static-imported into telemetry call sites

@@ -1,4 +1,8 @@
-package org.firstinspires.ftc.teamcode.core;
+package org.firstinspires.ftc.teamcode.core.state;
+
+import org.firstinspires.ftc.teamcode.core.Module;
+import org.firstinspires.ftc.teamcode.core.action.Action;
+import org.firstinspires.ftc.teamcode.core.action.Actions;
 
 /**
  * Marker interface for state-machine states. Implement on an enum and call {@link #setValue(double)}

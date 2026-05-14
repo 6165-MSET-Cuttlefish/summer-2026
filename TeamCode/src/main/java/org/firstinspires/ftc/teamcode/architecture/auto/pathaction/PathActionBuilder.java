@@ -14,10 +14,10 @@ import java.util.concurrent.Callable;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
-import org.firstinspires.ftc.teamcode.core.Action;
+import org.firstinspires.ftc.teamcode.core.action.Action;
 import org.firstinspires.ftc.teamcode.core.Module;
 import org.firstinspires.ftc.teamcode.core.Robot;
-import org.firstinspires.ftc.teamcode.core.State;
+import org.firstinspires.ftc.teamcode.core.state.State;
 
 /**
  * Fluent builder for an autonomous sequence of paths, actions, and waits. Pending {@code setState},

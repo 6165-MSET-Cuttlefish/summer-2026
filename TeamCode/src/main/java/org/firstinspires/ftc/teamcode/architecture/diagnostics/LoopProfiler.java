@@ -1,4 +1,4 @@
-package org.firstinspires.ftc.teamcode.core;
+package org.firstinspires.ftc.teamcode.architecture.diagnostics;
 
 import java.util.ArrayList;
 import java.util.Collections;

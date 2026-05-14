@@ -14,6 +14,8 @@ import org.firstinspires.ftc.teamcode.architecture.auto.FieldConfig;
 import org.firstinspires.ftc.teamcode.architecture.auto.PedroSetup;
 import org.firstinspires.ftc.teamcode.architecture.auto.RobotHardwareConfig;
 import org.firstinspires.ftc.teamcode.architecture.auto.pathaction.PathActionScheduler;
+import org.firstinspires.ftc.teamcode.architecture.diagnostics.OptimizationToggles;
+import org.firstinspires.ftc.teamcode.architecture.telemetry.EnhancedTelemetry;
 
 /**
  * Game-agnostic robot base. Holds the framework-level state (telemetry, follower, scheduler,

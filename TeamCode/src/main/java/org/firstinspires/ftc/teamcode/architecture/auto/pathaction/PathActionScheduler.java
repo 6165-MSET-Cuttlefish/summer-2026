@@ -10,10 +10,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.function.LongSupplier;
-import org.firstinspires.ftc.teamcode.core.Action;
-import org.firstinspires.ftc.teamcode.core.Actions;
+import org.firstinspires.ftc.teamcode.core.action.Action;
+import org.firstinspires.ftc.teamcode.core.action.Actions;
 import org.firstinspires.ftc.teamcode.core.Robot;
-import org.firstinspires.ftc.teamcode.core.State;
+import org.firstinspires.ftc.teamcode.core.state.State;
 
 /**
  * Drives a list of {@link PathActionSegment}s through a small state machine. Each {@link #update()}

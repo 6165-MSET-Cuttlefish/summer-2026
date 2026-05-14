@@ -1,4 +1,4 @@
-package org.firstinspires.ftc.teamcode.core;
+package org.firstinspires.ftc.teamcode.architecture.telemetry;
 
 /**
  * Renders a 2D pixel grid as Unicode Braille (U+2800..U+28FF) in HTML so the Driver Station can

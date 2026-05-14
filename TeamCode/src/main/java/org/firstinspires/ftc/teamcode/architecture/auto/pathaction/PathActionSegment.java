@@ -8,8 +8,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.function.Supplier;
-import org.firstinspires.ftc.teamcode.core.Action;
-import org.firstinspires.ftc.teamcode.core.State;
+import org.firstinspires.ftc.teamcode.core.action.Action;
+import org.firstinspires.ftc.teamcode.core.state.State;
 
 public class PathActionSegment {
 

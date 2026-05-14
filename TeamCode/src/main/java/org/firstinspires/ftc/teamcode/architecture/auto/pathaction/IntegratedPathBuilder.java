@@ -13,9 +13,9 @@ import com.pedropathing.paths.callbacks.PathCallback;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
-import org.firstinspires.ftc.teamcode.core.Action;
-import org.firstinspires.ftc.teamcode.core.ActionBuilder;
-import org.firstinspires.ftc.teamcode.core.Actions;
+import org.firstinspires.ftc.teamcode.core.action.Action;
+import org.firstinspires.ftc.teamcode.core.action.ActionBuilder;
+import org.firstinspires.ftc.teamcode.core.action.Actions;
 import org.firstinspires.ftc.teamcode.core.Robot;
 
 /**
