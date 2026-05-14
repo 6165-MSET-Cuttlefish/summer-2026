@@ -35,9 +35,11 @@ Claude maintains this file, not the user. After any change that alters how the p
 
 There is no test suite in this repo — it's a robot controller APK, not a library. `./gradlew :TeamCode:lint` exists via AGP but no team lint baseline is checked in.
 
-## Architecture
+The codebase is pure Java; no Kotlin plugin, no Kotlin sources. If reintroducing Kotlin, also re-add `apply plugin: 'kotlin-android'` to `TeamCode/build.gradle`, the `kotlin_version` ext + `kotlin-gradle-plugin` classpath in the root `build.gradle`, and a `kotlinOptions { jvmTarget '1.8' }` block to keep Java/Kotlin targets aligned.
 
-**Single-module Android application.** The traditional FTC SDK template ships two modules (`FtcRobotController` and `TeamCode`); they've been collapsed into one. The `FtcRobotControllerActivity`, `PermissionValidatorWrapper`, and `FtcOpModeRegister` live under `TeamCode/src/main/java/org/firstinspires/ftc/robotcontroller/internal/`. User OpModes live under `TeamCode/src/main/java/org/firstinspires/ftc/teamcode/`. The Gradle namespace is `com.qualcomm.ftcrobotcontroller` (matches `applicationId`) so the bundled activity's `import com.qualcomm.ftcrobotcontroller.BuildConfig` resolves; user OpMode Java packages are unaffected.
+## Module / Gradle structure
+
+**Single-module Android application.** The traditional FTC SDK template ships two modules (`FtcRobotController` and `TeamCode`); they've been collapsed into one. The `FtcRobotControllerActivity`, `PermissionValidatorWrapper`, and `FtcOpModeRegister` live under `TeamCode/src/main/java/org/firstinspires/ftc/robotcontroller/internal/`. Framework + user OpModes live under `TeamCode/src/main/java/org/firstinspires/ftc/teamcode/`. The Gradle namespace is `com.qualcomm.ftcrobotcontroller` (matches `applicationId`) so the bundled activity's `import com.qualcomm.ftcrobotcontroller.BuildConfig` resolves; user OpMode Java packages are unaffected.
 
 **No `FtcRobotController/` module.** Don't re-introduce one. The SDK is consumed entirely as Maven Central artifacts (`org.firstinspires.ftc:*:11.1.0`). If a new SDK version is needed, bump the version strings in `TeamCode/build.gradle` — there's no in-tree SDK clone to keep in sync.
 
@@ -45,16 +47,203 @@ There is no test suite in this repo — it's a robot controller APK, not a libra
 
 **Sloth integration.** The Sloth runtime AAR and its Gradle Load plugin come from the team's audit-fixed fork at `https://github.com/6165-MSET-Cuttlefish/Sloth`, pinned by `ext.slothRef` in the root `build.gradle`. The Load plugin (`apply plugin: 'dev.frozenmilk.sinister.sloth.load'` in `TeamCode/build.gradle`) registers `assembleSloth` / `dexSloth` / `deploySloth` / `removeSlothRemote`. Sloth pulls `dev.frozenmilk:Sinister:2.2.0` transitively from `https://repo.dairy.foundation/releases` — both that repo and JitPack are declared in the root `build.gradle`'s `allprojects` block. To bump Sloth, edit `ext.slothRef` to a new commit SHA on the 6165 fork.
 
-**Dashboard.** Telemetry/control comes via slothboard (`com.github.6165-MSET-Cuttlefish.slothboard:dashboard`), the team's fork of `Dairy-Foundation/ftc-dashboard`. Pinned by `ext.slothboardRef` in the root `build.gradle` (currently `edd4aca`). Both Sloth and slothboard pin by commit SHA rather than release tag — it's a single-team chain with no external consumers expecting semver. Slothboard's POM transitively pulls the 6165 Sloth fork, so the chain is `summer-2026 → slothboard → 6165/Sloth`. To bump slothboard, edit `slothboardRef`; don't introduce tags.
+**Dashboard.** Telemetry/control comes via slothboard (`com.github.6165-MSET-Cuttlefish.slothboard:dashboard`), the team's fork of `Dairy-Foundation/ftc-dashboard`. Pinned by `ext.slothboardRef` in the root `build.gradle`. Both Sloth and slothboard pin by commit SHA rather than release tag — it's a single-team chain with no external consumers expecting semver. Slothboard's POM transitively pulls the 6165 Sloth fork, so the chain is `summer-2026 → slothboard → 6165/Sloth`. To bump slothboard, edit `slothboardRef`; don't introduce tags.
 
-**Kotlin coroutines are wired up** (`kotlinx-coroutines-android:1.11.0`) but no OpMode uses them yet. Useful patterns are non-obvious: OpModes have no built-in `CoroutineScope` (unlike Android `Activity`/`ViewModel`); managed scope must be cancelled in `finally` after `runOpMode()` returns or in `OpMode.stop()`. Never `runBlocking` from the OpMode main thread — it blocks the control loop. Hardware reads are safe to call from background coroutines because the SDK synchronizes bus access, but logical races over your own state are your problem.
+**Pedro Pathing.** Path follower comes from `com.pedropathing:ftc:2.1.2` (Maven Central). The team's wrapper layer assumes Pedro 2.x semantics — `Pose` is immutable, `Pose.mirror(fieldWidth)` exists, `FTCCoordinates.INSTANCE` is the field-centered coordinate system, `PoseHistory` is a 30-sample fixed ring. Don't downgrade without checking the wrapper for callers of those.
+
+## Framework layout
+
+The team's framework lives under `TeamCode/src/main/java/org/firstinspires/ftc/teamcode/`. Two top-level packages:
+
+- **`core/`** — central abstractions every game uses.
+  - `EnhancedOpMode.java` — base OpMode with auto-discovered modules, voltage compensation, dual telemetry, dashboard field rendering, action scheduler pump.
+  - `Robot.java` — game-agnostic robot base. Game subclass instantiates mechanism modules in `initializeGameModules()`.
+  - `Module.java` — base for a hardware subsystem. Override `initStates()`, `read()`, `write()`, optional `init()` and `stop()`.
+  - `State.java` — state-machine state interface; backing maps live as statics on the interface itself, cleared per-OpMode via `State.clearModuleBindings()`.
+  - `AllianceColor.java`, `Context.java` — the only cross-game shared state is alliance side.
+  - `action/` — `Action`, `ActionBuilder`, `Actions` (cooperative single-thread scheduler).
+
+- **`architecture/`** — supporting wrappers and infrastructure.
+  - `OptimizationToggles.java` — framework-wide `@Config` toggles for telemetry cadence, profiler enable, etc.
+  - `auto/` — Pedro Pathing setup + path-action scheduler. `PedroSetup` builds the Follower; `RobotHardwareConfig` holds the per-robot hardware names; `scheduler/*` is the autonomous DSL on top of Pedro.
+  - `control/` — `PidController` (PID + feed-forward + static-friction kick).
+  - `hardware/` — `EnhancedMotor`, `EnhancedServo`, `EnhancedCRServo`, `WriteCache`, `BatteryVoltage`, `AbsoluteAnalogEncoder`.
+  - `input/` — gamepad layering and edge-detecting suppliers: `LayerStack`, `LayeredGamepad`, `LayerGamepad`, `EdgeBooleanSupplier`, `CachedDoubleSupplier`.
+  - `prism/` — vendored goBilda Prism RGB LED driver (MIT-licensed Base 10 Assets code; don't refactor, track upstream).
+  - `telemetry/` — `DualTelemetry` (fan-out DS + dashboard), `HtmlFormatter`, `FieldMapRenderer` (DS field map), `LoopProfiler` (per-section timing).
+  - `testing/` — `HardwareTest` (single-device bench-test OpMode templates).
+
+When adding a new file, prefer placing it in an existing subpackage. New top-level groupings should be rare.
+
+## OpMode lifecycle
+
+`EnhancedOpMode.init()` runs once. Order:
+
+1. `State.clearModuleBindings()` and `Actions.cancelAll()` — drop stale framework state from prior runs (Sloth hot-reloads, back-to-back opmode runs).
+2. Configure Lynx hubs to manual bulk caching, capture voltage sensor.
+3. `createRobot()` — game subclass hook. Instantiates Robot (and indirectly its Modules).
+4. `autoDiscoverModules()` — reflection walk of OpMode + Robot fields, registers everything `instanceof Module`.
+5. `initModules()` — for each Module: set its telemetry handle, call `initStates()` (binds State→Module and sets initial values), then call the optional `init()` hook.
+6. Build the sorted telemetry-modules list once (if `telemetrySortModulesOnce`).
+7. `initialize()` — user hook.
+8. Construct the `FieldMapRenderer` field-map and snapshot it.
+
+`init_loop()` and `loop()` share the same per-tick pipeline; `loop()` calls `gameLoop()` where `init_loop()` calls `initializeLoop()`, and `loop()` writes unconditionally where `init_loop()` gates writes on `shouldWriteDuringInit()` + a 500 ms post-init grace. Both pump `Actions.update()` (init-scope actions are cancelled by `Actions.reset()` at `start()`):
+
+```
+profiler.start
+clearBulkCaches             // every loop, manual mode
+updateVoltageThrottled      // every voltageReadLoopInterval (default 50)
+onLoopStart                 // game subclass hook
+readModules                 // refreshTunables() then m.read() per module
+robot.follower.update       // Pedro odometry + path follow tick
+gameLoop                    // user code (init_loop calls initializeLoop instead)
+Actions.update              // pump cooperative action scheduler
+writeModules                // m.write() per module if isWriteEnabled
+updateTelemetry             // gated by telemetryEveryNLoops; addStatusTelemetry
+                            // (alliance, pose, voltage, optional current) +
+                            // framework data + per-module telemetry +
+                            // braille field map
+updateDashboard             // build + send TelemetryPacket via FtcDashboard
+optional Thread.sleep       // if minLoopMs forces a floor
+```
+
+`Actions.update()` runs **between** `gameLoop()` and `writeModules()` so action-applied state lands in the same write pass as user code. Don't move it.
+
+`stop()` cancels all actions, cancels the path-action scheduler, calls `module.stop()` on every module (each in a try/catch so one bad module doesn't block the rest), then `onEnd()`.
+
+## Module pattern
+
+```java
+public class Shooter extends Module {
+    public enum FlywheelState implements State {
+        OFF(0), SHOOT(5400);
+        FlywheelState(double rpm) { setValue(rpm); }
+    }
+
+    @Config public static class Tuning {
+        public static double shootRpm = 5400;
+    }
+
+    private final EnhancedMotor flywheel;
+
+    public Shooter(HardwareMap hw) {
+        flywheel = new EnhancedMotor(hw, "flywheel").withVoltageCompensation(12.0);
+    }
+
+    @Override protected void initStates() {
+        setStates(FlywheelState.OFF);
+        bindTunable(FlywheelState.SHOOT, () -> Tuning.shootRpm);
+    }
+
+    @Override protected void read() {
+        // Read sensors. Tunables are already refreshed by the time we get here.
+    }
+
+    @Override protected void write() {
+        flywheel.setVelocity(getState(FlywheelState.class).getValue());
+    }
+
+    @Override public void stop() {
+        flywheel.setPower(0);  // safe-state on opmode end
+    }
+}
+```
+
+Conventions:
+- Mechanism state is an enum implementing `State`. Each variant carries its setpoint via `setValue` in the ctor.
+- `setStates(...)` once with the initial state per state-class. The framework binds every enum constant to this Module and re-applies its initial value, so a re-run starts clean.
+- `bindTunable(state, supplier)` after `setStates` for any setpoint that should be live-tunable. The framework re-applies the supplier value before each `read()`.
+- Pair tunables with a `@Config static class Tuning { public static double ... }` so FtcDashboard sees them as sliders.
+- `read()` reads sensors; `write()` commands hardware. They run every loop on the OpMode thread.
+- `init()` is optional — override for one-shot setup that runs once after `initStates()` has bound states. Both `init()` and `initStates()` run from `EnhancedOpMode.initModules()`, after the subclass constructor completes, so both can freely reference instance fields set up by the constructor.
+- `stop()` is optional — override to put hardware in a safe state on opmode end.
+- `state.activate()` from anywhere calls `module.setState(state)`. Returns true on success or no-op same-state; false only when the state class isn't registered or a guard rejected the transition.
+
+## Action system
+
+`Actions` is a single-threaded cooperative scheduler. Composable from primitives; runs on the OpMode thread between `gameLoop()` and `writeModules()`. No coroutines, no background threads, no concurrency.
+
+```java
+Actions.builder()
+    .set(IntakeState.IDLE, MagazineState.READY)
+    .delay(200)
+    .waitUntil(() -> robot.intake.isFull())
+    .run(() -> robot.lights.flash())
+    .build()
+    .schedule();
+```
+
+Composers: `sequence`, `parallel`, `race`, `timeout`, `repeat`, `loop`, `ifThen`, `ifElse`, `retry`. All return new `Action`s; can be nested.
+
+Conflict model: when an action is scheduled, any running action whose `targets` set intersects gets cancelled. `targets` is auto-populated by `set(State...)` (each State's owning Module) and by the inner actions of composers. Manual `targets(module)` exists if needed.
+
+Steps execute one per scheduler tick (one per OpMode loop). Instantaneous steps (`set`, `run`, `stopIf`) chain within a single tick — only blocking steps (`delay`, `waitUntil`, in-flight sub-actions) yield. Compose `delay(ms)` not `Thread.sleep(ms)`; `waitUntil(cond)` not `while (!cond) {}`.
+
+`Action.runBlocking()` and `Action.runSuspending()` no longer exist (they were coroutine-only foot-guns).
+
+## Path-action scheduler
+
+`PathActionBuilder` (`architecture/auto/scheduler/`) composes autonomous sequences of Pedro paths and Actions. Each tick of `PathActionScheduler.update()` advances the current segment by exactly one transition; the scheduler never blocks the loop.
+
+```java
+robot.pathActionScheduler = new PathActionBuilder()
+    .setStartPose(robot.follower.getPose())
+    .setState(IntakeState.PICKUP)
+    .buildPath(p -> p.addLine(scorePose).setLinearHeading(0, Math.PI/2))
+    .action(robot.actions.shootAll())
+    .build();
+```
+
+Queued `setState`/`run`/`actionDuring` calls accumulate and flush into the prelude/during of the next real segment, so they cost zero extra ticks. `setOverride(condition, handler)` (or `setTimeOverride(ms, handler)`) cancels the sequence and runs cleanup. `skipCurrentSegment()` and segment timeouts both honor after-actions before advancing — autos that "drive then shoot" still shoot when the drive doesn't finish in time.
+
+The scheduler is pumped from your auto's `gameLoop()`:
+
+```java
+@Override protected void gameLoop() {
+    robot.pathActionScheduler.update();
+    // ... gamepad-driven overrides etc. ...
+}
+```
+
+## Tuning
+
+There are three layers of "knob," in order of where to look:
+
+1. **Per-mechanism `@Config static class Tuning`** — setpoints, gains, offsets. Pair with `Module.bindTunable(state, () -> Tuning.x)` so dashboard edits land in the next `read()`.
+2. **`PedroSetup`** (`architecture/auto/`) — Pedro `FollowerConstants` / `MecanumConstants` / `PinpointConstants` / `PathConstraints`. Edit when retuning path follow.
+3. **`RobotHardwareConfig`** (`architecture/auto/`) — motor names, motor directions, Pinpoint pod offsets. Fields are `final`; edit only when wiring a new robot.
+
+Plus framework-wide knobs:
+
+- **`OptimizationToggles`** (`architecture/`) — runtime perf tunables (dashboard / telemetry cadence, profiler enable, current-read cadence, etc.). All are live; default values favor visibility, tighten for competition.
+- **`Robot.telemetryToggles`** — `dsTelemetry`, `dashboardTelemetry`, `voltage`, `current`, `loopProfile`. `loopProfile` is the master switch for the per-section breakdown rendered when tuning loop time.
+
+Avoid scattering ad-hoc `public static double` fields. If something is tunable, it lives in one of the buckets above.
+
+## Testing
+
+`architecture/testing/HardwareTest` provides nested abstract OpMode templates for single-device bench tests:
+
+```java
+@TeleOp(name = "Test leftClaw")
+public class LeftClawTest extends HardwareTest.ServoPosition {
+    @Override protected String hardwareName() { return "leftClaw"; }
+}
+```
+
+Three flavors: `ServoPosition` (D-pad nudges position), `MotorPower` (left stick drives power, logs encoder), `CRServoPower` (left stick drives power). Subclass, override `hardwareName()`, slap on `@TeleOp`. Gamepad-driven so they work without a dashboard.
+
+For "test one module in isolation" patterns, write a custom OpMode extending `OpMode` directly (not `EnhancedOpMode`) — the framework wants a `Robot` with discoverable modules, which is too much ceremony for a single-mechanism test.
 
 ## Conventions
 
-- Source/target `JavaVersion.VERSION_1_8`, `targetSdkVersion 28` — these are pinned by the FTC SDK's expectations. Don't bump without verifying with the FTC SDK release notes.
+- Source/target `JavaVersion.VERSION_1_8`, `targetSdkVersion 28` — pinned by the FTC SDK. Don't bump without verifying with the FTC SDK release notes.
 - The `versionCode` (61) and `versionName` ("11.1") in `TeamCode/build.gradle`'s `defaultConfig` track the FTC SDK version they were derived from. Bump in lockstep with `org.firstinspires.ftc:*` deps when upgrading.
 - Debug keystore at `libs/ftc.debug.keystore` is the FTC standard one (matches RC firmware installer's expectations); don't replace it.
 - `TeamCode/lib/OpModeAnnotationProcessor.jar` is the FTC annotation processor — leave it where it is.
+- Comments: only when the WHY is non-obvious. No method-name-restating Javadoc, no section-header banners (`// ─── label ──`). Short docs on user-facing public API where the name alone doesn't carry intent are fine.
+- Test/sample OpModes go under `opmodes/test/` (not present yet — first one creates the folder).
 
 ## Repo conventions discovered from prior conversations
 
