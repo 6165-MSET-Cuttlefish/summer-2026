@@ -16,9 +16,11 @@ import java.util.List;
 
 public class HomographyCalculationPipeline extends OpenCvPipeline {
 
-    // Inner corners (NOT squares)
-    private static final int GRID_COLS = 6;
-    private static final int GRID_ROWS = 9;
+    // Inner corners (NOT squares). MUST match the physical board AND
+    // PollenDetectionPipeline (9 across, 6 down) — otherwise this tool calibrates a
+    // transposed warp and the homography it prints pastes into Pollen with X/Y swapped.
+    private static final int GRID_COLS = 9;
+    private static final int GRID_ROWS = 6;
     private static final int EXPECTED_CORNERS = GRID_COLS * GRID_ROWS;
 
     private static final float SQUARE_SIZE_INCHES = 1.0f;
@@ -31,6 +33,7 @@ public class HomographyCalculationPipeline extends OpenCvPipeline {
     private final Telemetry telemetry;
 
     private final Mat gray = new Mat();
+    private final Mat warped = new Mat();
     private Mat homography = null;
 
     private int confirmCount = 0;
@@ -38,6 +41,7 @@ public class HomographyCalculationPipeline extends OpenCvPipeline {
     private int frameCount = 0;
 
     private final MatOfPoint2f dstCorners;
+    private final MatOfPoint2f imageCorners = new MatOfPoint2f();
 
     private final int[] gridLineXCoords = new int[GRID_COLS + 1];
     private final int[] gridLineYCoords = new int[GRID_ROWS + 1];
@@ -94,9 +98,7 @@ public class HomographyCalculationPipeline extends OpenCvPipeline {
         // Convert to grayscale
         Imgproc.cvtColor(input, gray, Imgproc.COLOR_RGB2GRAY);
 
-        // Detect chessboard corners
-        MatOfPoint2f imageCorners = new MatOfPoint2f();
-
+        // Detect chessboard corners (reused field — no per-frame native allocation)
         boolean found = Calib3d.findChessboardCorners(
                 gray,
                 new Size(GRID_COLS, GRID_ROWS),
@@ -131,11 +133,13 @@ public class HomographyCalculationPipeline extends OpenCvPipeline {
         Mat h = Calib3d.findHomography(imageCorners, dstCorners, Calib3d.RANSAC, 5.0);
 
         if (h == null || h.empty()) {
+            if (h != null) h.release();
             telemetry.addLine("Homography failed");
             telemetry.update();
             return input;
         }
 
+        if (homography != null) homography.release();
         homography = h;
         confirmCount++;
 
@@ -172,12 +176,10 @@ public class HomographyCalculationPipeline extends OpenCvPipeline {
         int width = (int)(GRID_COLS * SQUARE_SIZE_INCHES * OUTPUT_SCALE_PX + 2 * MARGIN_PX);
         int height = (int)(GRID_ROWS * SQUARE_SIZE_INCHES * OUTPUT_SCALE_PX + 2 * MARGIN_PX);
 
-        Size warpSize = new Size(width, height);
+        // Reuse the `warped` field — warpPerspective reallocates it as needed, then reuses.
+        Imgproc.warpPerspective(input, warped, homography, new Size(width, height));
 
-        Mat warped = new Mat();
-        Imgproc.warpPerspective(input, warped, homography, warpSize);
-
-        Scalar green = new Scalar(0,255,0);
+        Scalar green = new Scalar(0, 255, 0);
 
         int yStart = gridLineYCoords[0];
         int yEnd   = gridLineYCoords[GRID_ROWS];
