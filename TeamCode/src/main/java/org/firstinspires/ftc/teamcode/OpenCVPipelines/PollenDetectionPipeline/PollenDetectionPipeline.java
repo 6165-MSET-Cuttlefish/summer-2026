@@ -51,11 +51,6 @@ public class PollenDetectionPipeline extends OpenCvPipeline {
     private static final float  SQUARE_SIZE_INCHES = 1.0f;
     private static final double PIXELS_TO_INCHES   = SQUARE_SIZE_INCHES / OUTPUT_SCALE_PX; // 0.02
 
-    // Origin in the warped image = board center of the 950x800 warp. Reported positions
-    // are (warpedContact - origin) * PIXELS_TO_INCHES.  X right, Y down (further away).
-    private static final double ORIGIN_X = 450.0; // board center: MARGIN_PX + (GRID_COLS-1)/2 * OUTPUT_SCALE_PX = 250 + 200
-    private static final double ORIGIN_Y = 375.0; // board center: MARGIN_PX + (GRID_ROWS-1)/2 * OUTPUT_SCALE_PX = 250 + 125
-
     // Detection runs on the ORIGINAL camera image scaled down by this factor (perf).
     // Contact points are scaled back to full-res before the homography is applied.
     private static final double DETECTION_SCALE = 0.25;
@@ -63,8 +58,8 @@ public class PollenDetectionPipeline extends OpenCvPipeline {
     // Pollen is a yellow ball. The range spans bright-lit yellow through shadowed amber
     // and admits the duller pixels around the wiffle holes, while the saturation floor
     // still rejects the gray floor and the white calibration board.  HSV (OpenCV: H 0-179).
-    private static final Scalar YELLOW_LOW  = new Scalar(13,  80,  80);
-    private static final Scalar YELLOW_HIGH = new Scalar(36, 255, 255);
+    private static final Scalar YELLOW_LOW  = new Scalar(20,  80,  80);
+    private static final Scalar YELLOW_HIGH = new Scalar(30, 255, 255);
 
     // Physical ball radius (1.5 in radius = 3 in ball) in warped px, for the display ring.
     private static final double BALL_RADIUS_PX = (1.5 / PIXELS_TO_INCHES); // 75 px
@@ -73,6 +68,16 @@ public class PollenDetectionPipeline extends OpenCvPipeline {
     // the inscribed radius of the blob at that peak, so it doubles as a shape gate: thin
     // yellow objects (pens, tape, cables) never reach it and are rejected as non-round.
     private static final double MIN_PEAK_DIST = 3.0;
+
+    // When pinning the ground-contact point on the full-res mask, tolerate vertical gaps up to
+    // this many pixels (wiffle-ball holes); a longer run of non-ball pixels means the floor.
+    private static final int MAX_HOLE_GAP = 30;
+
+    // Temporal smoothing of detections (anti-flicker), in warped pixels / frames.
+    private static final double TRACK_MATCH_PX   = 100.0; // associate a detection to a track within this (~2 in)
+    private static final int    TRACK_MAX_MISSES = 6;     // keep a track alive this many frames after it was last seen
+    private static final int    TRACK_MIN_HITS   = 2;     // show a track only after it's been seen this many frames
+    private static final double TRACK_SMOOTH     = 0.5;   // EMA factor for the smoothed position (higher = snappier)
 
     private static final Mat OPEN_KERNEL = Imgproc.getStructuringElement(
             Imgproc.MORPH_ELLIPSE, new Size(3, 3));
@@ -85,9 +90,20 @@ public class PollenDetectionPipeline extends OpenCvPipeline {
     private static final int GRID_COLS = 9;
     private static final int GRID_ROWS = 6;
     private static final int EXPECTED_CORNERS = GRID_COLS * GRID_ROWS;
-    private static final float MARGIN_PX = 250.0f;
     private static final int DETECTION_FRAME_INTERVAL = 3;
     private static final int FRAMES_TO_CONFIRM = 5;
+
+    // Field shown around the board in the warped view. Larger = wider top-down viewport so
+    // balls that sit far from the board aren't clipped. Warp canvas = board span + 2*MARGIN_PX
+    // (so 500 -> 1450x1300). Raise it further if balls still fall off the edges.
+    private static final float MARGIN_PX = 500.0f;
+
+    // Origin = board center in the warped image; reported positions are
+    // (warpedContact - ORIGIN) * PIXELS_TO_INCHES.  +X = right, +Y = toward the bottom of
+    // the (vertically-corrected) top-down view.
+    // Derived from MARGIN_PX/grid so the two can never drift out of sync.
+    private static final double ORIGIN_X = MARGIN_PX + (GRID_COLS - 1) / 2.0 * SQUARE_SIZE_INCHES * OUTPUT_SCALE_PX; // 700
+    private static final double ORIGIN_Y = MARGIN_PX + (GRID_ROWS - 1) / 2.0 * SQUARE_SIZE_INCHES * OUTPUT_SCALE_PX; // 625
 
     private enum Phase { CALIBRATING, DETECTING }
 
@@ -108,10 +124,13 @@ public class PollenDetectionPipeline extends OpenCvPipeline {
     private final Mat localMax     = new Mat(); // dilated distMat, for local-maxima test
     private final Mat distFloor    = new Mat(); // absolute distance-floor mask
     private final Mat peaks        = new Mat(); // ball-center seeds
+    private final Mat hsvFull      = new Mat(); // full-res HSV (contact-point refinement)
+    private final Mat maskFull     = new Mat(); // full-res yellow mask (contact-point refinement)
     private final Mat contourImage = new Mat(); // returned display frame
     private final Mat contourHierarchy = new Mat();
     private final List<MatOfPoint> peakContours = new ArrayList<>();
     private final byte[] maskPixel = new byte[1]; // reused 1-byte buffer for mask column scans
+    private final List<Track> tracks = new ArrayList<>(); // persistent detections (anti-flicker)
 
     private final Mat          gray         = new Mat();
     private final MatOfPoint2f imageCorners = new MatOfPoint2f();
@@ -124,7 +143,7 @@ public class PollenDetectionPipeline extends OpenCvPipeline {
 
         if (USE_PREDETERMINED_HOMOGRAPHY) {
             homography = buildHomographyFromArray(H_ARRAY);
-            warpSize   = buildWarpSize(); // the board layout H_ARRAY targets (950x800), NOT camera res
+            warpSize   = buildWarpSize(); // the board layout the homography targets, NOT camera res
             cacheHomography();
             phase = Phase.DETECTING;
         } else {
@@ -243,6 +262,7 @@ public class PollenDetectionPipeline extends OpenCvPipeline {
             // 3. Distance transform; ball centers are LOCAL maxima (size-independent, so
             //    smaller/farther balls aren't dropped by a single global threshold).
             Imgproc.distanceTransform(filledMask, distMat, Imgproc.DIST_L2, 3);
+            Imgproc.GaussianBlur(distMat, distMat, new Size(3, 3), 0); // steady peak locations frame-to-frame
             Imgproc.dilate(distMat, localMax, PEAK_DILATE_KERNEL);
             Core.compare(distMat, localMax, peaks, Core.CMP_GE); // 255 where pixel == local max
 
@@ -258,32 +278,45 @@ public class PollenDetectionPipeline extends OpenCvPipeline {
             Imgproc.findContours(peaks, peakContours, contourHierarchy,
                     Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
 
+            // Full-resolution yellow mask, used only to pin each ball's ground-contact point
+            // precisely. The 1/4-scale pass above finds and separates balls, but its contact Y
+            // is quantized to ~4 full-res px, which the homography magnifies for distant balls.
+            Imgproc.cvtColor(input, hsvFull, Imgproc.COLOR_RGB2HSV);
+            Core.inRange(hsvFull, YELLOW_LOW, YELLOW_HIGH, maskFull);
+
             double[] warpPt = new double[2];
             for (MatOfPoint pc : peakContours) {
                 org.opencv.imgproc.Moments m = Imgproc.moments(pc);
                 if (m.m00 == 0) continue;
-                int ix = (int) Math.min(Math.max(m.m10 / m.m00, 0), filledMask.cols() - 1);
-                int cy = (int) Math.min(Math.max(m.m01 / m.m00, 0), filledMask.rows() - 1);
 
-                // Ground contact = the lowest point of the ball's silhouette directly below
-                // its center. Scan the mask column downward from the peak until the blob ends.
-                // (Reading the silhouette bottom is exact; centroid + inscribed radius would
-                // fall short of it for occluded or non-circular blobs.)
-                int bottomY = cy;
-                for (int y = cy; y < filledMask.rows(); y++) {
-                    filledMask.get(y, ix, maskPixel);
-                    if (maskPixel[0] == 0) break;
-                    bottomY = y;
+                // Ball center from the 1/4-scale pass, lifted to full-res original pixels.
+                int cxF = (int) Math.min(Math.max(m.m10 / m.m00 / DETECTION_SCALE, 0), maskFull.cols() - 1);
+                int cyF = (int) Math.min(Math.max(m.m01 / m.m00 / DETECTION_SCALE, 0), maskFull.rows() - 1);
+
+                // Ground contact = the lowest yellow pixel directly below the center in the
+                // full-res mask. Tolerate short gaps (wiffle holes); stop at the floor, i.e.
+                // once more than MAX_HOLE_GAP consecutive non-ball pixels have passed.
+                int bottomYF = cyF, gap = 0;
+                for (int y = cyF; y < maskFull.rows(); y++) {
+                    maskFull.get(y, cxF, maskPixel);
+                    if (maskPixel[0] != 0) { bottomYF = y; gap = 0; }
+                    else if (++gap > MAX_HOLE_GAP) break;
                 }
 
-                // Scale the contact point back to full-res original, then map through H.
-                if (!mapToWarp(ix / DETECTION_SCALE, bottomY / DETECTION_SCALE, warpPt)) continue;
+                // Map only that ground-plane contact point through the homography.
+                if (!mapToWarp(cxF, bottomYF, warpPt)) continue;
                 double xIn = (warpPt[0] - ORIGIN_X) * PIXELS_TO_INCHES;
                 double yIn = (warpPt[1] - ORIGIN_Y) * PIXELS_TO_INCHES;
                 balls.add(new float[]{ (float) warpPt[0], (float) warpPt[1], (float) xIn, (float) yIn });
             }
             for (MatOfPoint pc : peakContours) pc.release(); // free per-frame native contour Mats
         }
+
+        // Temporal smoothing: fold this frame's raw detections into persistent tracks so a
+        // briefly-missed ball (or a 1-frame false positive) doesn't flicker on/off, and the
+        // shown positions are EMA-smoothed. `stable` is the debounced output used below.
+        updateTracks(balls);
+        List<float[]> stable = confirmedTracks();
 
         // 4. Display.
         if (DISPLAY_MODE == DisplayMode.MASK) {
@@ -294,7 +327,7 @@ public class PollenDetectionPipeline extends OpenCvPipeline {
         } else {
             // Top-down warped image — shown every frame, including when no Pollen is present.
             Imgproc.warpPerspective(input, contourImage, homography, fullSize);
-            for (float[] ball : balls) {
+            for (float[] ball : stable) {
                 Point contact = new Point(ball[0], ball[1]);
                 Imgproc.circle(contourImage, contact, (int) BALL_RADIUS_PX, new Scalar(0, 255, 0), 2); // green ball-size ring (RGB)
                 Imgproc.circle(contourImage, contact, 5, new Scalar(255, 0, 0), -1);                    // red ground-contact dot (RGB)
@@ -304,9 +337,9 @@ public class PollenDetectionPipeline extends OpenCvPipeline {
 
         // 5. Telemetry.
         telemetry.addLine("[Detecting Pollen]");
-        telemetry.addData("Pollen Detected", balls.size());
-        for (int i = 0; i < balls.size(); i++) {
-            float[] ball = balls.get(i);
+        telemetry.addData("Pollen Detected", stable.size());
+        for (int i = 0; i < stable.size(); i++) {
+            float[] ball = stable.get(i);
             telemetry.addLine("--- Pollen " + i + " ---");
             telemetry.addData("  Ground X (in)", String.format("%.2f", ball[2]));
             telemetry.addData("  Ground Y (in)", String.format("%.2f", ball[3]));
@@ -373,7 +406,8 @@ public class PollenDetectionPipeline extends OpenCvPipeline {
             for (int col = 0; col < GRID_COLS; col++) {
                 dstList.add(new Point(
                         MARGIN_PX + col * SQUARE_SIZE_INCHES * OUTPUT_SCALE_PX,
-                        MARGIN_PX + row * SQUARE_SIZE_INCHES * OUTPUT_SCALE_PX
+                        // Row order flipped (GRID_ROWS-1-row) so the top-down warp isn't upside down.
+                        MARGIN_PX + (GRID_ROWS - 1 - row) * SQUARE_SIZE_INCHES * OUTPUT_SCALE_PX
                 ));
             }
         }
@@ -382,7 +416,7 @@ public class PollenDetectionPipeline extends OpenCvPipeline {
         return dst;
     }
 
-    /** Warp output size = board layout + margins (950x800 for a 9x6 board). */
+    /** Warp output size = board layout + 2*MARGIN_PX (1450x1300 with MARGIN_PX=500). */
     private static Size buildWarpSize() {
         int width  = (int)(GRID_COLS * SQUARE_SIZE_INCHES * OUTPUT_SCALE_PX + 2 * MARGIN_PX);
         int height = (int)(GRID_ROWS * SQUARE_SIZE_INCHES * OUTPUT_SCALE_PX + 2 * MARGIN_PX);
@@ -430,5 +464,65 @@ public class PollenDetectionPipeline extends OpenCvPipeline {
         }
         telemetry.addLine("Copy-paste string:");
         telemetry.addLine(getHomographyAsString());
+    }
+
+    // =========================================================================
+    // Temporal smoothing (anti-flicker)
+    // =========================================================================
+
+    private static final class Track {
+        double warpX, warpY; // EMA-smoothed warped position
+        int hits;            // frames matched (capped at TRACK_MIN_HITS)
+        int sinceSeen;       // frames since last matched
+    }
+
+    /** Folds this frame's raw detections into the persistent track list (greedy nearest match). */
+    private void updateTracks(List<float[]> detections) {
+        boolean[] matched = new boolean[tracks.size()];
+        List<Track> fresh = new ArrayList<>();
+        for (float[] d : detections) {
+            int best = -1;
+            double bestDist = TRACK_MATCH_PX * TRACK_MATCH_PX;
+            for (int i = 0; i < tracks.size(); i++) {
+                if (matched[i]) continue;
+                Track t = tracks.get(i);
+                double dx = t.warpX - d[0], dy = t.warpY - d[1];
+                double dd = dx * dx + dy * dy;
+                if (dd < bestDist) { bestDist = dd; best = i; }
+            }
+            if (best >= 0) {
+                Track t = tracks.get(best);
+                t.warpX += (d[0] - t.warpX) * TRACK_SMOOTH;
+                t.warpY += (d[1] - t.warpY) * TRACK_SMOOTH;
+                if (t.hits < TRACK_MIN_HITS) t.hits++;
+                t.sinceSeen = 0;
+                matched[best] = true;
+            } else {
+                Track t = new Track();
+                t.warpX = d[0];
+                t.warpY = d[1];
+                t.hits = 1;
+                t.sinceSeen = 0;
+                fresh.add(t);
+            }
+        }
+        // Age unmatched tracks; drop the stale ones.
+        for (int i = tracks.size() - 1; i >= 0; i--) {
+            if (matched[i]) continue;
+            if (++tracks.get(i).sinceSeen > TRACK_MAX_MISSES) tracks.remove(i);
+        }
+        tracks.addAll(fresh);
+    }
+
+    /** Confirmed, smoothed detections {warpX, warpY, xIn, yIn} — tracks seen >= TRACK_MIN_HITS. */
+    private List<float[]> confirmedTracks() {
+        List<float[]> out = new ArrayList<>();
+        for (Track t : tracks) {
+            if (t.hits < TRACK_MIN_HITS) continue;
+            double xIn = (t.warpX - ORIGIN_X) * PIXELS_TO_INCHES;
+            double yIn = (t.warpY - ORIGIN_Y) * PIXELS_TO_INCHES;
+            out.add(new float[]{ (float) t.warpX, (float) t.warpY, (float) xIn, (float) yIn });
+        }
+        return out;
     }
 }
