@@ -12,6 +12,7 @@ public class LayerStack<T> {
 
     private final Map<T, LayerGamepad> layers;
     private T currentLayer;
+    private Runnable onLayerChange;
 
     public LayerStack(T initialLayer, Map<T, LayerGamepad> layers) {
         if (layers == null || layers.isEmpty()) {
@@ -27,13 +28,27 @@ public class LayerStack<T> {
 
     public T getLayer() { return currentLayer; }
 
+    /**
+     * Notified after any actual {@code currentLayer} change. {@link LayeredGamepad} subscribes so its
+     * facade suppliers get primed+suppressed even when a caller changes layers on the stack directly
+     * (bypassing {@code LayeredGamepad.setLayer}); otherwise a held button fires a spurious edge on
+     * the new layer. Not fired by {@link #update()} (no layer change there).
+     */
+    void setOnLayerChange(Runnable onLayerChange) { this.onLayerChange = onLayerChange; }
+
+    private void fireLayerChanged() {
+        if (onLayerChange != null) onLayerChange.run();
+    }
+
     public void setLayer(T layer) {
         if (layer == null) throw new IllegalArgumentException("layer cannot be null");
         if (!layers.containsKey(layer)) {
             throw new IllegalArgumentException("layer " + layer + " is not in the map");
         }
+        boolean changed = !layer.equals(currentLayer);
         this.currentLayer = layer;
         update();
+        if (changed) fireLayerChanged();
     }
 
     public LayerGamepad getGamepad() {
@@ -54,8 +69,13 @@ public class LayerStack<T> {
         if (layer == null) throw new IllegalArgumentException("layer cannot be null");
         if (gamepad == null) throw new IllegalArgumentException("gamepad cannot be null");
         layers.put(layer, gamepad);
-        if (currentLayer == null) currentLayer = layer;
+        boolean changed = false;
+        if (currentLayer == null) {
+            currentLayer = layer;
+            changed = true;
+        }
         update();
+        if (changed) fireLayerChanged();
     }
 
     public LayerGamepad removeLayer(T layer) {
@@ -64,6 +84,7 @@ public class LayerStack<T> {
         if (layer.equals(currentLayer)) {
             currentLayer = layers.isEmpty() ? null : layers.keySet().iterator().next();
             update();
+            fireLayerChanged();
         }
         return removed;
     }

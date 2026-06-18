@@ -74,10 +74,10 @@ public class EdgeBooleanSupplier {
         boolean state = booleanSupplier.getAsBoolean();
         previous = state;
         current = state;
-        toggleTrue = state;
-        toggleFalse = state;
         valid = true;
         doubleClickDetected = false;
+        // Preserve toggleTrue/toggleFalse: priming suppresses spurious edges across a layer
+        // switch / re-init — it must NOT clear toggle latches the operator already set.
         // Drop the prior rising-edge timestamp so presses across a prime gap (e.g. layer switch)
         // don't register as a double-click.
         lastRisingEdgeTime = 0L;
@@ -144,32 +144,38 @@ public class EdgeBooleanSupplier {
                 this.booleanSupplier, this.risingDebounce / 1E9, debounce);
     }
 
+    // Combinators compose on the RAW underlying sources and let only the returned supplier own the
+    // edge/debounce state. Composing on this.getValue()/other.getValue() would re-run each operand's
+    // update() lazily and apply its debounce a second time, corrupting the combined edge timing.
+    // The returned supplier is the single edge-detector for the combination; debounce it if needed.
+
     public EdgeBooleanSupplier and(BooleanSupplier other) {
-        return new EdgeBooleanSupplier(() -> this.getValue() && other.getAsBoolean());
+        return new EdgeBooleanSupplier(() -> booleanSupplier.getAsBoolean() && other.getAsBoolean());
     }
 
     public EdgeBooleanSupplier and(EdgeBooleanSupplier other) {
-        return new EdgeBooleanSupplier(() -> this.getValue() && other.getValue());
+        return new EdgeBooleanSupplier(() -> booleanSupplier.getAsBoolean() && other.booleanSupplier.getAsBoolean());
     }
 
     public EdgeBooleanSupplier or(BooleanSupplier other) {
-        return new EdgeBooleanSupplier(() -> this.getValue() || other.getAsBoolean());
+        return new EdgeBooleanSupplier(() -> booleanSupplier.getAsBoolean() || other.getAsBoolean());
     }
 
     public EdgeBooleanSupplier or(EdgeBooleanSupplier other) {
-        return new EdgeBooleanSupplier(() -> this.getValue() || other.getValue());
+        return new EdgeBooleanSupplier(() -> booleanSupplier.getAsBoolean() || other.booleanSupplier.getAsBoolean());
     }
 
     public EdgeBooleanSupplier xor(BooleanSupplier other) {
-        return new EdgeBooleanSupplier(() -> this.getValue() ^ other.getAsBoolean());
+        return new EdgeBooleanSupplier(() -> booleanSupplier.getAsBoolean() ^ other.getAsBoolean());
     }
 
     public EdgeBooleanSupplier xor(EdgeBooleanSupplier other) {
-        return new EdgeBooleanSupplier(() -> this.getValue() ^ other.getValue());
+        return new EdgeBooleanSupplier(() -> booleanSupplier.getAsBoolean() ^ other.booleanSupplier.getAsBoolean());
     }
 
     public EdgeBooleanSupplier not() {
+        // Invert the raw source; rising/falling debounce swap because press/release swap.
         return new EdgeBooleanSupplier(
-                () -> !this.getValue(), fallingDebounce / 1E9, risingDebounce / 1E9);
+                () -> !booleanSupplier.getAsBoolean(), fallingDebounce / 1E9, risingDebounce / 1E9);
     }
 }

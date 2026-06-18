@@ -68,6 +68,7 @@ public final class ActionBuilder {
 
     /** Inline another action's steps + targets, flattening nested sequences. */
     public ActionBuilder action(Action action) {
+        action.markEmbedded();
         targets.addAll(action.getTargets());
         steps.addAll(action.steps);
         return this;
@@ -79,12 +80,15 @@ public final class ActionBuilder {
     }
 
     public ActionBuilder ifThen(BooleanSupplier condition, Action ifTrue) {
+        ifTrue.markEmbedded();
         targets.addAll(ifTrue.getTargets());
         steps.add(new Branch(condition, ifTrue, null));
         return this;
     }
 
     public ActionBuilder ifElse(BooleanSupplier condition, Action ifTrue, Action ifFalse) {
+        ifTrue.markEmbedded();
+        ifFalse.markEmbedded();
         targets.addAll(ifTrue.getTargets());
         targets.addAll(ifFalse.getTargets());
         steps.add(new Branch(condition, ifTrue, ifFalse));
@@ -92,18 +96,19 @@ public final class ActionBuilder {
     }
 
     public ActionBuilder parallel(Action... actions) {
-        for (Action a : actions) targets.addAll(a.getTargets());
+        for (Action a : actions) { a.markEmbedded(); targets.addAll(a.getTargets()); }
         steps.add(new Parallel(Arrays.asList(actions)));
         return this;
     }
 
     public ActionBuilder race(Action... actions) {
-        for (Action a : actions) targets.addAll(a.getTargets());
+        for (Action a : actions) { a.markEmbedded(); targets.addAll(a.getTargets()); }
         steps.add(new Race(Arrays.asList(actions)));
         return this;
     }
 
     public ActionBuilder timeout(Action action, long ms) {
+        action.markEmbedded();
         targets.addAll(action.getTargets());
         steps.add(new Timeout(action, ms));
         return this;
@@ -114,12 +119,14 @@ public final class ActionBuilder {
     }
 
     public ActionBuilder repeat(Action action, IntSupplier times) {
+        action.markEmbedded();
         targets.addAll(action.getTargets());
         steps.add(new Repeat(action, times));
         return this;
     }
 
     public ActionBuilder loop(Action action, BooleanSupplier condition) {
+        action.markEmbedded();
         targets.addAll(action.getTargets());
         steps.add(new Loop(action, condition));
         return this;
@@ -132,6 +139,7 @@ public final class ActionBuilder {
     public ActionBuilder retry(Action action, int maxAttempts, long delayMs, BooleanSupplier success) {
         if (maxAttempts < 1) throw new IllegalArgumentException("maxAttempts must be at least 1");
         if (delayMs < 0) throw new IllegalArgumentException("delayMs must be non-negative");
+        action.markEmbedded();
         targets.addAll(action.getTargets());
         steps.add(new Retry(action, maxAttempts, delayMs, success));
         return this;
@@ -289,14 +297,23 @@ public final class ActionBuilder {
 
         @Override
         protected boolean tick(Action parent) {
-            boolean winner = false;
+            // Tick in order and stop at the first child that terminates, so losers that haven't
+            // reached their instant step this tick don't fire it. Only a genuinely completed child
+            // (not a cancelled/errored one) is the winner.
+            Action winner = null;
+            boolean decided = false;
             for (int i = 0; i < actions.size(); i++) {
-                if (actions.get(i).tick()) winner = true;
+                Action a = actions.get(i);
+                if (a.tick()) {
+                    decided = true;
+                    if (a.isComplete()) winner = a;
+                    break;
+                }
             }
-            if (winner) {
+            if (decided) {
                 for (int i = 0; i < actions.size(); i++) {
                     Action a = actions.get(i);
-                    if (!a.isComplete()) a.cancel();
+                    if (a != winner && !a.isComplete()) a.cancel();
                 }
                 return true;
             }
@@ -363,6 +380,7 @@ public final class ActionBuilder {
         protected boolean tick(Action parent) {
             if (done >= total) return true;
             if (action.tick()) {
+                if (action.isCancelled()) { parent.cancel(); return true; }
                 done++;
                 if (done < total) action.reset();
             }
@@ -395,6 +413,7 @@ public final class ActionBuilder {
         protected boolean tick(Action parent) {
             if (!active) return true;
             if (action.tick()) {
+                if (action.isCancelled()) { parent.cancel(); return true; }
                 if (condition.getAsBoolean()) {
                     action.reset();
                 } else {
@@ -441,6 +460,7 @@ public final class ActionBuilder {
                 action.reset();
             }
             if (action.tick()) {
+                if (action.isCancelled()) { parent.cancel(); return true; }
                 attempts++;
                 if (success.getAsBoolean() || attempts >= maxAttempts) return true;
                 if (delayMs > 0) {

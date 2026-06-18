@@ -119,7 +119,9 @@ public class PidController {
 
         if (deltaTimeSeconds > 0) {
             if (derivativeOnMeasurement) {
-                errorDerivative = -(position - previousPosition) / deltaTimeSeconds;
+                // wrapError the measurement delta too: without it a continuous-input controller
+                // (e.g. heading in [-π, π]) sees a ~2π jump at the wrap boundary and spikes D.
+                errorDerivative = -wrapError(position - previousPosition) / deltaTimeSeconds;
             } else {
                 errorDerivative = (error - previousError) / deltaTimeSeconds;
             }

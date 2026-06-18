@@ -33,6 +33,14 @@ public class PathActionScheduler {
     private List<Action> pendingActions = new ArrayList<>();
     private List<Action> activeDuringActions = new ArrayList<>();
 
+    // Resolved deferred-path state, captured at follow time so stopCurrentPath() can engage end-hold
+    // (or break) on a resolver segment, which has no stable PathChain to re-issue.
+    private PathChain activeResolvedChain = null;
+    private boolean activeResolvedHoldEnd = false;
+    // Armed once distance-remaining exceeds holdAtDistance, so a short path / oversized threshold
+    // can't short-circuit the drive on the first PATH_RUNNING tick.
+    private boolean leftHoldStart = false;
+
     private final List<Callable<Boolean>> overrideConditions = new ArrayList<>();
     private Runnable overrideCallback = null;
     private boolean overrideTriggered = false;
@@ -194,6 +202,9 @@ public class PathActionScheduler {
 
     private void initializeSegment(PathActionSegment segment) {
         segmentStartTimeMs = now();
+        leftHoldStart = false;
+        activeResolvedChain = null;
+        activeResolvedHoldEnd = false;
         cancelAsyncOperations();
 
         List<State> states = segment.getModuleStates();
@@ -223,7 +234,14 @@ public class PathActionScheduler {
             boolean holdEnd;
             if (segment.hasResolver()) {
                 PathActionSegment.Resolved r = segment.getResolver().get();
-                chain = r.path; during = r.duringActions; holdEnd = r.holdEnd;
+                chain = r.path;
+                // Merge the queued during-actions drained into the segment with the resolver's own,
+                // so actionDuring(...) before buildPathDeferred(...) still runs (CLAUDE.md contract).
+                during = new ArrayList<>(segment.getDuringActions());
+                during.addAll(r.duringActions);
+                holdEnd = r.holdEnd;
+                activeResolvedChain = chain;
+                activeResolvedHoldEnd = holdEnd;
             } else {
                 chain = segment.getPath();
                 during = segment.getDuringActions();
@@ -265,6 +283,9 @@ public class PathActionScheduler {
         currentIndex++;
         currentState = SchedulerState.IDLE;
         segmentStartTimeMs = 0L;
+        leftHoldStart = false;
+        activeResolvedChain = null;
+        activeResolvedHoldEnd = false;
     }
 
     private void cancelAsyncOperations() {
@@ -282,9 +303,23 @@ public class PathActionScheduler {
             follower().breakFollowing();
             return;
         }
-        if (!segment.hasPath()) return;
-        // Re-issuing followPath(path, true) is how we ask Pedro to engage its end-hold.
-        if (segment.isHoldEnd()) follower().followPath(segment.getPath(), true);
+
+        PathChain chain;
+        boolean holdEnd;
+        if (segment.hasResolver()) {
+            // A resolver has no stable PathChain to rebuild; reuse the one captured at follow time.
+            chain = activeResolvedChain;
+            holdEnd = activeResolvedHoldEnd;
+        } else if (segment.hasPath()) {
+            chain = segment.getPath();
+            holdEnd = segment.isHoldEnd();
+        } else {
+            return;
+        }
+
+        // Re-issuing followPath(chain, true) is how we ask Pedro to engage its end-hold; otherwise
+        // stop driving outright so a timed-out/skipped segment never leaves the robot coasting.
+        if (holdEnd && chain != null) follower().followPath(chain, true);
         else follower().breakFollowing();
     }
 
@@ -340,7 +375,16 @@ public class PathActionScheduler {
 
     private boolean shouldHoldAtDistance(PathActionSegment segment) {
         Double distance = segment.getHoldAtDistance();
-        return distance != null && follower().getDistanceRemaining() <= distance;
+        if (distance == null) return false;
+        double remaining = follower().getDistanceRemaining();
+        if (remaining > distance) {
+            // Real distance still ahead — arm the early-advance for when we get close.
+            leftHoldStart = true;
+            return false;
+        }
+        // Only honor the threshold once the robot has actually driven toward the end; otherwise a
+        // short path or oversized holdAtDistance would skip the drive on the first tick.
+        return leftHoldStart;
     }
 
     private boolean shouldStopPath(PathActionSegment segment) {
