@@ -35,6 +35,8 @@ Claude maintains this file, not the user. After any change that alters how the p
 
 There is no test suite in this repo — it's a robot controller APK, not a library. `./gradlew :TeamCode:lint` exists via AGP but no team lint baseline is checked in.
 
+**Build JDK: Java 17.** The Gradle daemon is pinned to Java 17 via `gradle/gradle-daemon-jvm.properties` (`toolchainVersion=17`) — AGP 8.7's required JDK. Building on a newer JDK (e.g. 25) only produced deprecation warnings, but JDK 17 is the supported baseline, so a JDK 17 install must be discoverable (Gradle 8.9 can't auto-download one — that landed in 8.10). The `./gradlew` launcher JVM is separate and can be anything on `PATH`; only the daemon JVM (which runs AGP/javac/dex) is pinned. Don't bump this without checking AGP/Gradle JDK compatibility.
+
 The codebase is pure Java; no Kotlin plugin, no Kotlin sources. If reintroducing Kotlin, also re-add `apply plugin: 'kotlin-android'` to `TeamCode/build.gradle`, the `kotlin_version` ext + `kotlin-gradle-plugin` classpath in the root `build.gradle`, and a `kotlinOptions { jvmTarget '1.8' }` block to keep Java/Kotlin targets aligned.
 
 ## Module / Gradle structure
