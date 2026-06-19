@@ -10,7 +10,6 @@ import org.opencv.core.MatOfPoint2f;
 import org.opencv.core.Point;
 import org.opencv.core.Scalar;
 import org.opencv.core.Size;
-import org.opencv.core.TermCriteria;
 import org.opencv.imgproc.Imgproc;
 import org.openftc.easyopencv.OpenCvPipeline;
 
@@ -86,9 +85,11 @@ public class PollenDetectionPipeline extends OpenCvPipeline {
     private static final Mat PEAK_DILATE_KERNEL = Imgproc.getStructuringElement(
             Imgproc.MORPH_ELLIPSE, new Size(3, 3));
 
-    // Homography calibration settings — 9x6 inner-corner chessboard.
-    private static final int GRID_COLS = 9;
-    private static final int GRID_ROWS = 6;
+    // Homography calibration settings — 7x7 inner-corner chessboard (a standard 8x8
+    // checkers/draughts board). Orientation is irrelevant here: we only need the top-down
+    // rectification, and any 90/180/mirror of it is still a valid metric warp.
+    private static final int GRID_COLS = 7;
+    private static final int GRID_ROWS = 7;
     private static final int EXPECTED_CORNERS = GRID_COLS * GRID_ROWS;
     private static final int DETECTION_FRAME_INTERVAL = 3;
     private static final int FRAMES_TO_CONFIRM = 5;
@@ -370,23 +371,20 @@ public class PollenDetectionPipeline extends OpenCvPipeline {
     private boolean detectChessboardCorners(Mat input) {
         Imgproc.cvtColor(input, gray, Imgproc.COLOR_RGB2GRAY);
 
-        boolean found = Calib3d.findChessboardCorners(
+        // Sector-based detector (OpenCV 4): far more robust to blur, glare, and the steep
+        // floor-level perspective than the legacy findChessboardCorners, and it returns
+        // sub-pixel corners directly (no cornerSubPix pass needed). EXHAUSTIVE trades speed
+        // for hit-rate — the right call for a one-time calibration.
+        boolean found = Calib3d.findChessboardCornersSB(
                 gray,
                 new Size(GRID_COLS, GRID_ROWS),
                 imageCorners,
-                Calib3d.CALIB_CB_ADAPTIVE_THRESH |
-                        Calib3d.CALIB_CB_NORMALIZE_IMAGE |
-                        Calib3d.CALIB_CB_FAST_CHECK
+                Calib3d.CALIB_CB_NORMALIZE_IMAGE |
+                        Calib3d.CALIB_CB_EXHAUSTIVE |
+                        Calib3d.CALIB_CB_ACCURACY
         );
 
-        if (!found || imageCorners.rows() != EXPECTED_CORNERS) return false;
-
-        Imgproc.cornerSubPix(
-                gray, imageCorners,
-                new Size(5, 5), new Size(-1, -1),
-                new TermCriteria(TermCriteria.EPS + TermCriteria.MAX_ITER, 30, 0.01)
-        );
-        return true;
+        return found && imageCorners.rows() == EXPECTED_CORNERS;
     }
 
     /** Computes a RANSAC homography mapping srcCorners -> dstCorners; null if empty. */

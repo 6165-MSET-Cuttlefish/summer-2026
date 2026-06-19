@@ -7,7 +7,6 @@ import org.opencv.core.MatOfPoint2f;
 import org.opencv.core.Point;
 import org.opencv.core.Scalar;
 import org.opencv.core.Size;
-import org.opencv.core.TermCriteria;
 import org.opencv.imgproc.Imgproc;
 import org.openftc.easyopencv.OpenCvPipeline;
 
@@ -17,10 +16,10 @@ import java.util.List;
 public class HomographyCalculationPipeline extends OpenCvPipeline {
 
     // Inner corners (NOT squares). MUST match the physical board AND
-    // PollenDetectionPipeline (9 across, 6 down) — otherwise this tool calibrates a
-    // transposed warp and the homography it prints pastes into Pollen with X/Y swapped.
-    private static final int GRID_COLS = 9;
-    private static final int GRID_ROWS = 6;
+    // PollenDetectionPipeline (7 across, 7 down — a standard 8x8 checkers board) so the
+    // homography this tool prints pastes into Pollen consistently.
+    private static final int GRID_COLS = 7;
+    private static final int GRID_ROWS = 7;
     private static final int EXPECTED_CORNERS = GRID_COLS * GRID_ROWS;
 
     private static final float SQUARE_SIZE_INCHES = 1.0f;
@@ -98,14 +97,16 @@ public class HomographyCalculationPipeline extends OpenCvPipeline {
         // Convert to grayscale
         Imgproc.cvtColor(input, gray, Imgproc.COLOR_RGB2GRAY);
 
-        // Detect chessboard corners (reused field — no per-frame native allocation)
-        boolean found = Calib3d.findChessboardCorners(
+        // Sector-based detector (OpenCV 4) — robust to blur/glare/steep perspective and
+        // returns sub-pixel corners directly, so no cornerSubPix pass is needed. EXHAUSTIVE
+        // favors hit-rate over speed, which is fine for a one-time calibration.
+        boolean found = Calib3d.findChessboardCornersSB(
                 gray,
                 new Size(GRID_COLS, GRID_ROWS),
                 imageCorners,
-                Calib3d.CALIB_CB_ADAPTIVE_THRESH +
-                        Calib3d.CALIB_CB_NORMALIZE_IMAGE +
-                        Calib3d.CALIB_CB_FAST_CHECK
+                Calib3d.CALIB_CB_NORMALIZE_IMAGE +
+                        Calib3d.CALIB_CB_EXHAUSTIVE +
+                        Calib3d.CALIB_CB_ACCURACY
         );
 
         if (!found || imageCorners.rows() != EXPECTED_CORNERS) {
@@ -115,19 +116,6 @@ public class HomographyCalculationPipeline extends OpenCvPipeline {
             telemetry.update();
             return input;
         }
-
-        // Subpixel refinement
-        Imgproc.cornerSubPix(
-                gray,
-                imageCorners,
-                new Size(5, 5),
-                new Size(-1, -1),
-                new TermCriteria(
-                        TermCriteria.EPS + TermCriteria.MAX_ITER,
-                        30,
-                        0.01
-                )
-        );
 
         // Compute homography
         Mat h = Calib3d.findHomography(imageCorners, dstCorners, Calib3d.RANSAC, 5.0);
