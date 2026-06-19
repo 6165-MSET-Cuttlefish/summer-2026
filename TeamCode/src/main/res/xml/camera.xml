@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- Minimal camera-only config for the "Camera Tune" OpMode (no drivetrain/mechanisms).
+     Webcam name matches CameraTune.WEBCAM_NAME and decode.xml. -->
+<Robot type="FirstInspires-FTC">
+    <LynxUsbDevice name="Control Hub Portal" parentModuleAddress="173" serialNumber="(embedded)">
+        <LynxModule name="Control Hub" port="173" />
+    </LynxUsbDevice>
+    <Webcam name="nerdDetector" serialNumber="UC852" /> <!-- Arducam UC-852 (OV9782) -->
+</Robot>
