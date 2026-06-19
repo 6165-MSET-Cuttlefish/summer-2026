@@ -1,5 +1,7 @@
 package org.firstinspires.ftc.teamcode.OpenCVPipelines.PollenDetectionPipeline;
 
+import com.acmerobotics.dashboard.config.Config;
+
 import org.firstinspires.ftc.robotcore.external.Telemetry;
 import org.opencv.calib3d.Calib3d;
 import org.opencv.core.Core;
@@ -27,6 +29,7 @@ import java.util.List;
  * (the floor-contact point, which IS on the ground plane), and map only that point
  * through the homography. The warped view is used for display only.
  */
+@Config
 public class PollenDetectionPipeline extends OpenCvPipeline {
 
     // Set true to skip live calibration and use the hardcoded H_ARRAY below.
@@ -35,7 +38,6 @@ public class PollenDetectionPipeline extends OpenCvPipeline {
     //   MASK    — upscaled detection mask (tune the HSV range against this).
     //   OVERLAY — top-down warped image with a ground-contact marker per ball.
     public enum DisplayMode { MASK, OVERLAY }
-    private static final DisplayMode DISPLAY_MODE = DisplayMode.OVERLAY;
 
     // Predetermined homography (used when USE_PREDETERMINED_HOMOGRAPHY = true).
     private static final double[][] H_ARRAY = {
@@ -54,19 +56,31 @@ public class PollenDetectionPipeline extends OpenCvPipeline {
     // Contact points are scaled back to full-res before the homography is applied.
     private static final double DETECTION_SCALE = 0.25;
 
-    // Pollen is a yellow ball. The range spans bright-lit yellow through shadowed amber
-    // and admits the duller pixels around the wiffle holes, while the saturation floor
-    // still rejects the gray floor and the white calibration board.  HSV (OpenCV: H 0-179).
-    private static final Scalar YELLOW_LOW  = new Scalar(20,  80,  80);
-    private static final Scalar YELLOW_HIGH = new Scalar(30, 255, 255);
+    /**
+     * Live-tunable yellow HSV gate + shape gate (FtcDashboard). Defaults are measured off real
+     * Pollen frames (garage + competition lighting): the ball body spans H≈[12,34], so the hue
+     * band is widened well past the old [20,30] that left fragmented blobs. The saturation floor is
+     * kept low enough to catch dim/competition balls — which means sunlit warm clutter (cardboard,
+     * skin, wood) can also pass the color gate; the roundness gate ({@link #minPeakDist}) and the
+     * field-bounds check downstream reject that, and mounting the camera to look AT the field keeps
+     * it out of frame. Glare (white specular tops) is low-saturation and excluded here, then filled
+     * back in by the morphological close, so each ball still reads as one solid blob.
+     * HSV is OpenCV-scaled: H 0-179, S/V 0-255.
+     */
+    @Config
+    public static class Tuning {
+        // Dashboard dropdown: MASK = raw detection mask (tune HSV against it); OVERLAY = top-down view.
+        public static DisplayMode displayMode = DisplayMode.OVERLAY;
+        public static int hLow = 15, hHigh = 34;
+        public static int sLow = 80, sHigh = 255;
+        public static int vLow = 80, vHigh = 255;
+        // Min inscribed radius (downscaled px) for a blob to count as a ball — the round-shape gate.
+        public static double minPeakDist = 3.0;
+    }
 
     // Physical ball radius (1.5 in radius = 3 in ball) in warped px, for the display ring.
     private static final double BALL_RADIUS_PX = (1.5 / PIXELS_TO_INCHES); // 75 px
 
-    // Minimum distance-transform value (downscaled px) for a peak to be accepted. This is
-    // the inscribed radius of the blob at that peak, so it doubles as a shape gate: thin
-    // yellow objects (pens, tape, cables) never reach it and are rejected as non-round.
-    private static final double MIN_PEAK_DIST = 3.0;
 
     // When pinning the ground-contact point on the full-res mask, tolerate vertical gaps up to
     // this many pixels (wiffle-ball holes); a longer run of non-ball pixels means the floor.
@@ -80,8 +94,10 @@ public class PollenDetectionPipeline extends OpenCvPipeline {
 
     private static final Mat OPEN_KERNEL = Imgproc.getStructuringElement(
             Imgproc.MORPH_ELLIPSE, new Size(3, 3));
+    // Larger close than before: spans the white specular glare on top of a ball (and the wiffle
+    // holes) so the body fills back into one solid, convex blob instead of a ring with a hole.
     private static final Mat FILL_KERNEL = Imgproc.getStructuringElement(
-            Imgproc.MORPH_ELLIPSE, new Size(7, 7));
+            Imgproc.MORPH_ELLIPSE, new Size(11, 11));
     private static final Mat PEAK_DILATE_KERNEL = Imgproc.getStructuringElement(
             Imgproc.MORPH_ELLIPSE, new Size(3, 3));
 
@@ -250,8 +266,10 @@ public class PollenDetectionPipeline extends OpenCvPipeline {
         //    point must be measured before the ground-plane warp distorts ball height.
         Imgproc.resize(input, detSmall,
                 new Size(input.cols() * DETECTION_SCALE, input.rows() * DETECTION_SCALE));
+        Scalar yellowLow  = new Scalar(Tuning.hLow,  Tuning.sLow,  Tuning.vLow);
+        Scalar yellowHigh = new Scalar(Tuning.hHigh, Tuning.sHigh, Tuning.vHigh);
         Imgproc.cvtColor(detSmall, hsv, Imgproc.COLOR_RGB2HSV);
-        Core.inRange(hsv, YELLOW_LOW, YELLOW_HIGH, yellowMask);
+        Core.inRange(hsv, yellowLow, yellowHigh, yellowMask);
 
         // 2. Remove specks (open), then fill the wiffle-ball holes (close).
         Imgproc.morphologyEx(yellowMask, cleanMask,  Imgproc.MORPH_OPEN,  OPEN_KERNEL);
@@ -268,8 +286,8 @@ public class PollenDetectionPipeline extends OpenCvPipeline {
             Core.compare(distMat, localMax, peaks, Core.CMP_GE); // 255 where pixel == local max
 
             // Absolute distance floor: drops noise specks AND thin (non-round) objects,
-            // whose inscribed radius never reaches MIN_PEAK_DIST.
-            Imgproc.threshold(distMat, distFloor, MIN_PEAK_DIST, 255, Imgproc.THRESH_BINARY);
+            // whose inscribed radius never reaches Tuning.minPeakDist.
+            Imgproc.threshold(distMat, distFloor, Tuning.minPeakDist, 255, Imgproc.THRESH_BINARY);
             distFloor.convertTo(distFloor, CvType.CV_8U);
             Core.bitwise_and(peaks, distFloor, peaks);
 
@@ -283,7 +301,7 @@ public class PollenDetectionPipeline extends OpenCvPipeline {
             // precisely. The 1/4-scale pass above finds and separates balls, but its contact Y
             // is quantized to ~4 full-res px, which the homography magnifies for distant balls.
             Imgproc.cvtColor(input, hsvFull, Imgproc.COLOR_RGB2HSV);
-            Core.inRange(hsvFull, YELLOW_LOW, YELLOW_HIGH, maskFull);
+            Core.inRange(hsvFull, yellowLow, yellowHigh, maskFull);
 
             double[] warpPt = new double[2];
             for (MatOfPoint pc : peakContours) {
@@ -306,6 +324,10 @@ public class PollenDetectionPipeline extends OpenCvPipeline {
 
                 // Map only that ground-plane contact point through the homography.
                 if (!mapToWarp(cxF, bottomYF, warpPt)) continue;
+                // Background (people, clutter above the wall) isn't on the ground plane, so its
+                // contact projects off the top-down field canvas — drop anything outside it.
+                if (warpPt[0] < 0 || warpPt[1] < 0
+                        || warpPt[0] >= fullSize.width || warpPt[1] >= fullSize.height) continue;
                 double xIn = (warpPt[0] - ORIGIN_X) * PIXELS_TO_INCHES;
                 double yIn = (warpPt[1] - ORIGIN_Y) * PIXELS_TO_INCHES;
                 balls.add(new float[]{ (float) warpPt[0], (float) warpPt[1], (float) xIn, (float) yIn });
@@ -320,7 +342,7 @@ public class PollenDetectionPipeline extends OpenCvPipeline {
         List<float[]> stable = confirmedTracks();
 
         // 4. Display.
-        if (DISPLAY_MODE == DisplayMode.MASK) {
+        if (Tuning.displayMode == DisplayMode.MASK) {
             // Detection mask (original space), upscaled — for tuning the HSV range. Ball markers
             // are in warped coords, so they're omitted here (they wouldn't line up with this view).
             Imgproc.resize(filledMask, yellowMask, fullSize, 0, 0, Imgproc.INTER_NEAREST);
