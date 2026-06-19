@@ -43,7 +43,9 @@ public class CameraTune extends LinearOpMode {
 
         webcam.openCameraDeviceAsync(new OpenCvCamera.AsyncCameraOpenListener() {
             @Override public void onOpened() {
-                webcam.startStreaming(WIDTH, HEIGHT, OpenCvCameraRotation.UPRIGHT);
+                // OV9782 only offers 640x480 in MJPEG, not the default uncompressed YUY2.
+                webcam.startStreaming(WIDTH, HEIGHT, OpenCvCameraRotation.UPRIGHT,
+                        OpenCvWebcam.StreamFormat.MJPEG);
                 FtcDashboard.getInstance().startCameraStream(webcam, DASHBOARD_FPS);
                 // Controls need an open, streaming camera, so build the helper here.
                 controls = new WebcamControls(webcam);
