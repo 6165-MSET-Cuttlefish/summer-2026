@@ -1,6 +1,7 @@
 package org.firstinspires.ftc.teamcode.OpenCVPipelines.PollenDetectionPipeline;
 
-import com.acmerobotics.dashboard.config.Config;
+
+
 
 import org.firstinspires.ftc.robotcore.external.Telemetry;
 import org.opencv.calib3d.Calib3d;
@@ -29,7 +30,7 @@ import java.util.List;
  * (the floor-contact point, which IS on the ground plane), and map only that point
  * through the homography. The warped view is used for display only.
  */
-@Config
+
 public class PollenDetectionPipeline extends OpenCvPipeline {
 
     // Set true to skip live calibration and use the hardcoded H_ARRAY below.
@@ -67,7 +68,6 @@ public class PollenDetectionPipeline extends OpenCvPipeline {
      * back in by the morphological close, so each ball still reads as one solid blob.
      * HSV is OpenCV-scaled: H 0-179, S/V 0-255.
      */
-    @Config
     public static class Tuning {
         // Dashboard dropdown: MASK = raw detection mask (tune HSV against it); OVERLAY = top-down view.
         public static DisplayMode displayMode = DisplayMode.OVERLAY;
