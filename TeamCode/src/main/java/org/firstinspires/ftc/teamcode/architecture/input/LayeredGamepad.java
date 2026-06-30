@@ -26,6 +26,8 @@ public class LayeredGamepad<T> {
     public LayeredGamepad(LayerStack<T> layerStack) {
         if (layerStack == null) throw new IllegalArgumentException("layerStack cannot be null");
         this.layerStack = layerStack;
+        // Prime+suppress the facade on every layer change, including direct LayerStack mutations.
+        layerStack.setOnLayerChange(this::onLayerChanged);
 
         leftStickX  = mappedDouble(cg -> cg.leftStickX);
         leftStickY  = mappedDouble(cg -> cg.leftStickY);
@@ -87,8 +89,11 @@ public class LayeredGamepad<T> {
     public void setLayer(T layer) {
         if (layer == null) throw new IllegalArgumentException("layer cannot be null");
         if (layer.equals(layerStack.getLayer())) return;
-
+        // The stack fires onLayerChanged() once it commits the change — that primes+suppresses.
         layerStack.setLayer(layer);
+    }
+
+    private void onLayerChanged() {
         // Push atRest physically before priming so suppliers see the new layer state.
         layerStack.invalidateAll();
         primeAllSuppliers();

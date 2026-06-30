@@ -217,13 +217,15 @@ public class PathActionBuilder {
 
     @CheckResult
     public PathActionScheduler build() {
-        // Flush trailing queue items as a final no-op segment so they actually run.
+        // Flush trailing queue items as a final no-op segment so they actually run. Force enabled:
+        // the gate flag suppresses PATH execution, but a disabled segment is skipped wholesale
+        // (prelude/states/during dropped), and this terminal segment carries no path to gate.
         if (!queuedRunnables.isEmpty() || !queuedDuringActions.isEmpty() || !queuedStates.isEmpty()) {
             segments.add(new PathActionSegment.Builder()
                     .preludeRunnables(drainQueuedRunnables())
                     .duringActions(drainQueuedDuringActions())
                     .moduleStates(drainQueuedStates())
-                    .enabled(enabled)
+                    .enabled(true)
                     .build());
         }
         PathActionScheduler scheduler = new PathActionScheduler(follower, clock);

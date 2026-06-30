@@ -94,7 +94,7 @@ public abstract class Module {
         for (State s : initialStates) {
             s.setModule(this);
             states.add(s);
-            stateMap.put(s.getClass(), s);
+            stateMap.put(keyOf(s), s);
 
             if (s instanceof Enum<?>) {
                 // getDeclaringClass handles enum constants with bodies (anonymous subclasses
@@ -131,7 +131,7 @@ public abstract class Module {
     public final boolean setState(State newState) {
         for (int i = 0; i < states.size(); i++) {
             State current = states.get(i);
-            if (newState.getClass() != current.getClass()) continue;
+            if (keyOf(newState) != keyOf(current)) continue;
             if (newState.equals(current)) return true;
 
             if (!checkGuards(current, newState)) return false;
@@ -139,10 +139,10 @@ public abstract class Module {
             fireExitHooks(current);
 
             stateHistory.addLast(current);
-            if (stateHistory.size() > maxHistorySize) stateHistory.pollFirst();
+            while (stateHistory.size() > maxHistorySize) stateHistory.pollFirst();
 
             states.set(i, newState);
-            stateMap.put(newState.getClass(), newState);
+            stateMap.put(keyOf(newState), newState);
             newState.setModule(this);
             stateTimer.reset();
 
@@ -177,6 +177,7 @@ public abstract class Module {
 
     public final void setMaxHistorySize(int size) {
         this.maxHistorySize = Math.max(1, size);
+        while (stateHistory.size() > maxHistorySize) stateHistory.pollFirst();
     }
 
     public final int getMaxHistorySize() {
@@ -195,13 +196,23 @@ public abstract class Module {
         exitHooks.add(new StateHook(state, action));
     }
 
+    /**
+     * State-class identity key. Enum constants with method bodies report an anonymous subclass from
+     * getClass(); getDeclaringClass() returns the declared enum type that callers register and look
+     * up by. Used everywhere a state is matched to its registered slot so the read/guard/write paths
+     * agree (otherwise setState between two body-bearing constants silently no-ops).
+     */
+    @SuppressWarnings("unchecked")
+    private static Class<? extends State> keyOf(State s) {
+        if (s instanceof Enum<?>) {
+            return (Class<? extends State>) ((Enum<?>) s).getDeclaringClass();
+        }
+        return s.getClass();
+    }
+
     @SuppressWarnings("unchecked")
     private <T extends State> boolean checkGuards(State from, State to) {
-        // Enum constants with method bodies return an anonymous subclass from getClass();
-        // getDeclaringClass() returns the declared type that callers actually register.
-        Class<?> fromKey = (from instanceof Enum<?>)
-                ? ((Enum<?>) from).getDeclaringClass()
-                : from.getClass();
+        Class<?> fromKey = keyOf(from);
         for (TransitionGuard<?> g : guards) {
             if (g.stateClass == fromKey) {
                 TransitionGuard<T> typedGuard = (TransitionGuard<T>) g;

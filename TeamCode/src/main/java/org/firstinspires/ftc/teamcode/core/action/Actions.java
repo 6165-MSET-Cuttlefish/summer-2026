@@ -103,6 +103,12 @@ public final class Actions {
     }
 
     static void schedule(Action action) {
+        if (action.isEmbedded()) {
+            System.err.println("[Actions] Refusing to schedule '" + action.getName()
+                    + "': it was composed into another action and shares mutable step state. "
+                    + "Build a fresh action instead of reusing a composed one.");
+            return;
+        }
         int i = 0;
         while (i < active.size()) {
             Action a = active.get(i);

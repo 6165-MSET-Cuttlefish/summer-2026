@@ -45,6 +45,7 @@ public abstract class EnhancedOpMode extends OpMode {
     private final LoopProfiler profiler = new LoopProfiler();
     private List<LynxModule> lynxHubs;
     private int loopIndex = 0;
+    private long monotonicLoopCount = 0;
     private int voltageLoopCounter = 0;
     private int dashboardLoopCounter = 0;
     private int dashboardPoseHistoryLoopCounter = 0;
@@ -52,7 +53,7 @@ public abstract class EnhancedOpMode extends OpMode {
 
     private final List<Module> modules = new ArrayList<>();
     private List<Module> sortedTelemetryModules;
-    private int currentReadLoopCounter = 0;
+    private long lastCurrentReadLoop = Long.MIN_VALUE;
     private double cachedTotalCurrent = 0.0;
     private VoltageSensor voltageSensor;
     private double voltage = 12.0;
@@ -183,6 +184,14 @@ public abstract class EnhancedOpMode extends OpMode {
         running = true;
         gameTimer.reset();
         clearBulkCaches();
+        // Reset throttle counters so the first match loop samples voltage/current/telemetry/field
+        // fresh instead of inheriting a mid-cycle phase from the init loop.
+        voltageLoopCounter = 0;
+        telemetryLoopCounter = 0;
+        dashboardLoopCounter = 0;
+        dashboardPoseHistoryLoopCounter = 0;
+        loopsSinceFieldRender = Integer.MAX_VALUE;
+        lastCurrentReadLoop = Long.MIN_VALUE;
         Actions.reset();
         scheduleDefaultActions();
         onStart();
@@ -290,16 +299,29 @@ public abstract class EnhancedOpMode extends OpMode {
         while (clazz != EnhancedOpMode.class && clazz != Object.class && clazz != null) {
             for (Field f : clazz.getDeclaredFields()) {
                 f.setAccessible(true);
-                Object val = f.get(obj);
-                if (val == null) continue;
-
-                if (val instanceof Module) {
-                    register((Module) val);
-                } else if (shouldRecurse(val.getClass())) {
-                    discover(val, val.getClass(), visited);
-                }
+                discoverValue(f.get(obj), visited);
             }
             clazz = clazz.getSuperclass();
+        }
+    }
+
+    /** Register a Module, or descend through arrays/collections/maps and object fields to find them. */
+    private void discoverValue(Object val, Set<Object> visited) throws IllegalAccessException {
+        if (val == null) return;
+
+        if (val instanceof Module) {
+            register((Module) val);
+        } else if (val instanceof Object[]) {
+            for (Object e : (Object[]) val) discoverValue(e, visited);
+        } else if (val instanceof Iterable<?>) {
+            for (Object e : (Iterable<?>) val) discoverValue(e, visited);
+        } else if (val instanceof Map<?, ?>) {
+            for (Map.Entry<?, ?> e : ((Map<?, ?>) val).entrySet()) {
+                discoverValue(e.getKey(), visited);
+                discoverValue(e.getValue(), visited);
+            }
+        } else if (shouldRecurse(val.getClass())) {
+            discover(val, val.getClass(), visited);
         }
     }
 
@@ -380,6 +402,7 @@ public abstract class EnhancedOpMode extends OpMode {
     private void recordLoopTime() {
         loopTimes[loopIndex] = loopTimer.milliseconds();
         loopIndex = (loopIndex + 1) % loopTimes.length;
+        monotonicLoopCount++;
     }
 
     private void updateTelemetry() {
@@ -526,12 +549,15 @@ public abstract class EnhancedOpMode extends OpMode {
 
     public final double getTotalCurrent() {
         int every = Math.max(1, currentReadEveryNLoops);
-        if (every == 1 || currentReadLoopCounter == 0) {
+        // Throttle against the real loop counter, not call count: getTotalCurrent() is only invoked
+        // when the current telemetry toggle is on AND telemetry renders this loop, so a per-call
+        // counter would read far less often than currentReadEveryNLoops promises.
+        if (lastCurrentReadLoop == Long.MIN_VALUE || monotonicLoopCount - lastCurrentReadLoop >= every) {
             double total = 0;
             for (LynxModule hub : lynxHubs) total += hub.getCurrent(CurrentUnit.AMPS);
             cachedTotalCurrent = total;
+            lastCurrentReadLoop = monotonicLoopCount;
         }
-        currentReadLoopCounter = (currentReadLoopCounter + 1) % every;
         return cachedTotalCurrent;
     }
 

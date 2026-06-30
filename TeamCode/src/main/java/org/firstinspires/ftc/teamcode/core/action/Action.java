@@ -20,6 +20,7 @@ public final class Action {
     private boolean done = false;
     private boolean cancelled = false;
     private boolean completedEarly = false;
+    private boolean embedded = false;
 
     Action(List<Step> steps, Set<Module> targets, String name) {
         this.steps = steps;
@@ -50,6 +51,15 @@ public final class Action {
     public boolean isCancelled() {
         return cancelled;
     }
+
+    /**
+     * Marked once this Action's steps/children have been folded into another action (composed via
+     * {@code action()}, {@code sequence}, {@code parallel}, {@code race}, etc.). Such an action shares
+     * mutable Step state with its host, so scheduling it independently would corrupt both — the
+     * scheduler refuses it. Build a fresh action per use instead.
+     */
+    void markEmbedded() { embedded = true; }
+    boolean isEmbedded() { return embedded; }
 
     public float getProgress() {
         if (steps.isEmpty() || done) return 1f;
