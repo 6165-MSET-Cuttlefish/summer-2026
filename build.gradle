@@ -11,6 +11,9 @@ buildscript {
     // Pinned slothboard commit on the 6165 fork. The published v1.0.0 tag
     // predates the Sloth-fork swap; bump to a newer tag once one is cut.
     ext.slothboardRef = 'edd4aca'
+    ext {
+        kotlin_version = '2.3.20'
+    }
     repositories {
         mavenCentral()
         google()
@@ -20,6 +23,7 @@ buildscript {
         // Note for FTC Teams: Do not modify this yourself.
         classpath 'com.android.tools.build:gradle:8.7.0'
         classpath "com.github.6165-MSET-Cuttlefish.Sloth:Load:${slothRef}"
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.0"
     }
 }
 

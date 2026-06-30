@@ -3,9 +3,10 @@ import java.text.SimpleDateFormat
 apply plugin: 'com.android.application'
 // Sloth hot-reload deployment tasks (assembleSloth, dexSloth, deploySloth, etc.).
 apply plugin: 'dev.frozenmilk.sinister.sloth.load'
+apply plugin: 'org.jetbrains.kotlin.android'
 
 android {
-    compileSdk 34
+    compileSdk 35
     namespace 'com.qualcomm.ftcrobotcontroller'
 
     signingConfigs {
@@ -69,9 +70,22 @@ android {
     }
 
     ndkVersion '21.3.6528147'
+    kotlinOptions {
+        jvmTarget = '1.8'
+    }
+}
+repositories {
+    maven {
+        url = 'https://maven.brott.dev/'
+    }
+}
+
+configurations.configureEach {
+    exclude group: 'com.acmerobotics.dashboard'
 }
 
 dependencies {
+    implementation 'androidx.core:core-ktx:1.15.0'
     implementation 'org.firstinspires.ftc:Inspection:11.1.0'
     implementation 'org.firstinspires.ftc:Blocks:11.1.0'
     implementation 'org.firstinspires.ftc:RobotCore:11.1.0'
@@ -82,8 +96,19 @@ dependencies {
     implementation 'org.firstinspires.ftc:Vision:11.1.0'
     implementation 'androidx.appcompat:appcompat:1.2.0'
 
+    implementation "com.acmerobotics.roadrunner:ftc:0.1.25"
+    implementation "com.acmerobotics.roadrunner:core:1.0.1"
+    implementation "com.acmerobotics.roadrunner:actions:1.0.1"
+//    implementation "com.acmerobotics.dashboard:dashboard:0.5.0"
+
+    implementation("com.acmerobotics.roadrunner:ftc:0.1.25") {
+        exclude group: 'com.acmerobotics.dashboard'
+    }
+
     implementation 'com.pedropathing:ftc:2.1.2'
     implementation 'com.pedropathing:telemetry:1.0.0'
+
+    implementation 'org.ftclib.ftclib:core:2.1.1'
 
     // Sloth hot-reload runtime from the 6165 fork. slothRef is defined in the
     // root build.gradle's buildscript ext block so it's shared with the Load
