@@ -119,4 +119,5 @@ dependencies {
     // transitively (slothboard's own POM declares it), so versions stay in
     // sync as long as slothboard's pinned slothRef matches the one above.
     implementation "com.github.6165-MSET-Cuttlefish.slothboard:dashboard:${slothboardRef}"
+    implementation 'androidx.xr.runtime:runtime:1.0.0-alpha14'
 }
