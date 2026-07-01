@@ -17,8 +17,8 @@ import java.util.Objects;
 @Config
 public final class PinpointLocalizerPurePursuit implements Localizer {
     public static class Params {
-        public double parYTicks = -3572.484213461919; // y position of the parallel encoder (in tick units)
-        public double perpXTicks = -1149.6318610111696; // x position of the perpendicular encoder (in tick units)
+        public double parYTicks = -6.5/MecanumDrivePurePursuit.PARAMS.inPerTick; // y position of the parallel encoder (in tick units)
+        public double perpXTicks = 1.25/MecanumDrivePurePursuit.PARAMS.inPerTick; // x position of the perpendicular encoder (in tick units)
     }
 
     public static Params PARAMS = new Params();

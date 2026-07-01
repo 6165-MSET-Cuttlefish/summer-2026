@@ -9,16 +9,18 @@ import com.qualcomm.robotcore.hardware.PIDCoefficients;
 
 import org.firstinspires.ftc.teamcode.purepursuit.Robot;
 import org.firstinspires.ftc.teamcode.purepursuit.math.Pose;
+import org.firstinspires.ftc.teamcode.purepursuit.math.PurePursuit;
 import org.firstinspires.ftc.teamcode.purepursuit.pid.SquIDController;
 
 @Config
-@TeleOp
+@TeleOp(group = "purepursuit")
 public class SquidTuner extends LinearOpMode {
-    public static double kSQx = 0.02;
-    public static double kSQy = 0.02;
-    public static double polynomial = 1.8;
+    public static double kSQx = 0.05;
+    public static double kSQy = 0.05;
+    public static double kF = 0.1;
+    public static double polynomial = 1.4;
 
-    public static double hP = 0.6, hI = 0, hD = 0.05;
+    public static double hP = 3, hI = 0, hD = 0.05;
 
     public static double targetX = 0, targetY = 0, targetH = 0;
     public static boolean random = false;
@@ -34,16 +36,20 @@ public class SquidTuner extends LinearOpMode {
         waitForStart();
 
         while (opModeIsActive() && !isStopRequested()) {
+            bot.drive.updatePoseEstimate();
+            bot.purePursuit.updateSearchRadius(bot.purePursuit.searchRad);
+
             bot.purePursuit.kSQx = kSQx;
             bot.purePursuit.kSQy = kSQy;
+            bot.purePursuit.kF = kF;
             bot.purePursuit.hPID = new PIDCoefficients(hP, hI, hD);
             bot.purePursuit.singlePIDtoPoint(new Pose(targetX, targetY, targetH));
             SquIDController.polynomial = polynomial;
 
             if (random) {
                 random = false;
-                targetX = 48*Math.random() - 24;
-                targetY = 48*Math.random() - 24;
+                targetX = 24*Math.random() - 12;
+                targetY = 24*Math.random() - 12;
                 targetH = 2*Math.PI* Math.random();
             }
 

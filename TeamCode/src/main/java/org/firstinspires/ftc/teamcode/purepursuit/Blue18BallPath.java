@@ -15,7 +15,7 @@ import org.firstinspires.ftc.teamcode.purepursuit.math.Pose;
 import org.firstinspires.ftc.teamcode.purepursuit.math.PurePursuit;
 
 
-@TeleOp
+@TeleOp(group = "purepursuit")
 @Config
 public class Blue18BallPath extends LinearOpMode {
     @Override

@@ -76,12 +76,12 @@ public final class MecanumDrivePurePursuit {
 
         // drive model parameters
         public double inPerTick = 0.0019813424;
-        public double lateralInPerTick = 0.0015520428505280755;
-        public double trackWidthTicks = 6902.096251075426;
+        public double lateralInPerTick = 0.0013512409235597526;
+        public double trackWidthTicks = 6158.351794513583;
 
         // feedforward parameters (in tick units)
-        public double kS = 1.1545016807377544;
-        public double kV = 0.00025871333190521554;
+        public double kS = 2.551962979466973;
+        public double kV = 0.0002138633931747083;
         public double kA = 0.00015;
 
         // path profile parameters (in inches)
@@ -237,10 +237,10 @@ public final class MecanumDrivePurePursuit {
 
         // TODO: make sure your config has motors with these names (or change them)
         //   see https://ftc-docs.firstinspires.org/en/latest/hardware_and_software_configuration/configuring/index.html
-        leftBack = hardwareMap.get(DcMotorEx.class, "leftBack");
-        leftFront = hardwareMap.get(DcMotorEx.class, "leftFront");
-        rightFront = hardwareMap.get(DcMotorEx.class, "rightFront");
-        rightBack = hardwareMap.get(DcMotorEx.class, "rightBack");
+        leftBack = hardwareMap.get(DcMotorEx.class, "bl");
+        leftFront = hardwareMap.get(DcMotorEx.class, "fl");
+        rightFront = hardwareMap.get(DcMotorEx.class, "fr");
+        rightBack = hardwareMap.get(DcMotorEx.class, "br");
 
         leftFront.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
         leftBack.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);

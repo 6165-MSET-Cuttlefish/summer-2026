@@ -14,12 +14,12 @@ import org.firstinspires.ftc.teamcode.purepursuit.math.Pose;
 import org.firstinspires.ftc.teamcode.purepursuit.math.PurePursuit;
 
 
-@TeleOp
+@TeleOp(group = "purepursuit")
 @Config
 public class PurePursuitTuner extends LinearOpMode {
     public static double searchRad = 8;
     public static double maxPower = 0.4;
-    public static double kSQx = 0.06, kSQy = 0.06, kF = 0.003;
+    public static double kSQx = 0.05, kSQy = 0.05, kF = 0.1;
     @Override
     public void runOpMode() throws InterruptedException {
         Robot bot = new Robot(hardwareMap);
@@ -63,6 +63,13 @@ public class PurePursuitTuner extends LinearOpMode {
                         .addControlPoint(36, 0)
                         .addControlPoint(0,0)
                         .build()).build();
+
+        Bezier spline = PurePursuit.builder
+                .addControlPoint(0,0)
+                .addControlPoint(36,0)
+                .addControlPoint(0, 36)
+                .addControlPoint(36,36)
+                .build();
         waitForStart();
 
         while (opModeIsActive() && !isStopRequested()) {
@@ -71,8 +78,8 @@ public class PurePursuitTuner extends LinearOpMode {
             bot.purePursuit.kSQx = kSQx;
             bot.purePursuit.kSQy = kSQy;
             bot.purePursuit.kF = kF;
-            Actions.runBlocking(bot.followPath(curve));
-            Actions.runBlocking(bot.followPathReversed(curve2));
+            Actions.runBlocking(bot.followPath(spline));
+            Actions.runBlocking(bot.followPathReversed(spline.reverse()));
         }
 //        Actions.runBlocking(bot.followPathConstantHeading(curve, 0));
 

@@ -91,11 +91,11 @@ class PurePursuit(drive: MecanumDrivePurePursuit) {
 
     @JvmField var kSQx = 0.05
     @JvmField var kSQy = 0.05
-    @JvmField var kF = 0.005
+    @JvmField var kF = 0.1
 
     var xSquid: SquIDController = SquIDController(kSQx, kF)
     var ySquid: SquIDController = SquIDController(kSQy, kF)
-    @JvmField var hPID: PIDCoefficients = PIDCoefficients(0.6, 0.05,0.05)
+    @JvmField var hPID: PIDCoefficients = PIDCoefficients(3.0, 0.05,0.05)
 
     var hController = PIDController(hPID.p, hPID.i, hPID.d)
 
