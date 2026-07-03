@@ -8,6 +8,7 @@ import org.opencv.core.Mat;
 import org.opencv.core.MatOfPoint;
 import org.opencv.core.MatOfPoint2f;
 import org.opencv.core.Point;
+import org.opencv.core.Rect;
 import org.opencv.core.Scalar;
 import org.opencv.core.Size;
 import org.opencv.core.TermCriteria;
@@ -44,41 +45,76 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
     private static final boolean USE_PREDETERMINED_HOMOGRAPHY = true;
 
     // -------------------------------------------------------------------------
-    // DISPLAY MODE — both modes now draw on the ORIGINAL (unwarped) camera
-    // frame, preserving full field of view.
+    // DISPLAY MODE — all modes draw on the ORIGINAL (unwarped) camera frame,
+    // preserving full field of view.
     //
     //   MASK    — binary detection mask (white = yellow detected) at full
     //             camera resolution, with contour/center/contact overlays.
     //             Useful for tuning HSV thresholds and morphology.
     //
-    //   OVERLAY — full-color camera image with the same overlays. Useful for
-    //             verifying detections against the real scene.
+    //   OVERLAY — full-color camera image with contour outline + center dot +
+    //             contact dot overlays. Useful for verifying detections
+    //             against the real scene.
+    //
+    //   BOX     — full-color camera image with a clean axis-aligned bounding
+    //             box around each ball and a solid label plate above the box
+    //             showing the ball number and its calculated field
+    //             coordinates. Best for a clean, presentation-style view.
     // -------------------------------------------------------------------------
-    public enum DisplayMode { MASK, OVERLAY }
-    private static final DisplayMode DISPLAY_MODE = DisplayMode.OVERLAY; // ← change here
+    public enum DisplayMode { MASK, OVERLAY, BOX }
+    private static final DisplayMode DISPLAY_MODE = DisplayMode.BOX; // ← change here
 
     // -------------------------------------------------------------------------
-    // Converted from HomographyCalculationPipeline output (pixel dst space) to
-    // inch dst space via H_inch = S_inv * H_pixel, where
-    // S_inv = [[1/25, 0, -10], [0, 1/25, -10], [0, 0, 1]].
-    // Re-run live calibration (USE_PREDETERMINED_HOMOGRAPHY = false) for a
-    // fresh result calibrated directly in inch space.
+    // QUICK FIX APPLIED: every reported distance was exactly 2x too large.
+    // The matrix below is the original H_ARRAY pre-multiplied by the scale
+    // matrix diag(0.5, 0.5, 1) — i.e. S * H, where S halves only the output
+    // (x, y) rows and leaves the bottom projective row untouched. This is the
+    // mathematically correct way to halve every output distance; naively
+    // dividing all 9 raw entries by 2 would also incorrectly scale the
+    // perspective terms in the bottom row and break the transform.
+    //
+    // This patches the symptom, not the root cause. The original matrix was
+    // itself a manual pixel-to-inch conversion of an older pipeline's output
+    // (see the derivation note that used to be here) — that conversion is
+    // where the 2x almost certainly crept in. If distances drift off again
+    // after any recalibration, redo this scale correction, or better, run
+    // live calibration once (USE_PREDETERMINED_HOMOGRAPHY = false) to get a
+    // matrix computed directly by this pipeline with no manual conversion
+    // step at all.
     // -------------------------------------------------------------------------
     private static final double[][] H_ARRAY = {
-            { -3.5594949247e-01, -1.0612401847e-01,  1.2082718993e+02 },
-            { -4.1371433084e-02, -7.8756315897e-01,  2.8349653964e+02 },
+            { -1.7797474624e-01, -5.3062009235e-02,  6.0413594965e+01 },
+            { -2.0685716542e-02, -3.9378157948e-01,  1.4174826982e+02 },
             { -2.8668090956e-04, -1.2403394999e-02,  1.0000000000e+00 }
     };
 
     // -------------------------------------------------------------------------
-    // Detection downscale factor
+    // Detection downscale factor.
+    //
+    // PERFORMANCE: this is the single biggest lever in the whole pipeline.
+    // HSV conversion, all three morphology passes, the distance transform,
+    // and the per-pixel Java loop that builds the watershed markers mat all
+    // scale with the NUMBER OF PIXELS processed, which scales with the SQUARE
+    // of this factor (half the linear scale = quarter the pixels = ~4x faster
+    // on every one of those steps). At 1.0 (full 640x480 camera resolution)
+    // this is by far the largest contributor to a ~1000ms frame time.
+    //
+    // 0.5 processes ~4x fewer pixels than 1.0 and is a safe starting point —
+    // ball detection accuracy is largely unaffected because the shape/size
+    // checks later in the pipeline are scale-invariant (fractions of frame
+    // area, not fixed pixel counts). Detected points are scaled back up to
+    // full resolution before being transformed by the homography, so
+    // reported field coordinates are not affected by this value at all.
+    //
+    // Lower further (e.g. 0.35) for more speed if 0.5 isn't enough; raise
+    // toward 1.0 only if small/distant balls stop being detected reliably.
     // -------------------------------------------------------------------------
-    private static final double DETECTION_SCALE = 1.0;
+    private static final double DETECTION_SCALE = 0.5;
 
     // -------------------------------------------------------------------------
     // Yellow ball HSV range.
     // -------------------------------------------------------------------------
-    private static final Scalar YELLOW_LOW  = new Scalar(15, 100, 100);
+    private static final Scalar YELLOW_LOW  = new Scalar(15, 120, 120);
     private static final Scalar YELLOW_HIGH = new Scalar(34, 255, 255);
 
     // -------------------------------------------------------------------------
@@ -132,7 +168,33 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
     private static final int   GRID_COLS        = 9;
     private static final int   GRID_ROWS        = 6;
     private static final int   EXPECTED_CORNERS = GRID_COLS * GRID_ROWS;
-    private static final float SQUARE_SIZE_INCHES = 1.0f;
+    // -------------------------------------------------------------------------
+    // Physical size of ONE chessboard square, in inches. This is the single
+    // source of truth for the scale of every distance the pipeline reports —
+    // it directly defines what "1 unit" means in the calibration destination
+    // grid (see buildCalibrationDstCorners() below), so an error here produces
+    // a uniform, constant-factor error in every single reported coordinate.
+    //
+    // If every reported distance is consistently OFF BY A FIXED MULTIPLE
+    // (e.g. exactly 2x too large, or exactly 2x too small), the almost
+    // certain cause is this constant not matching your PHYSICAL PRINTED
+    // board — not a bug in the transform math. Measure an actual square
+    // on the printed board with a ruler (not the pattern's nominal/intended
+    // size, since printers/PDF scaling can shrink or enlarge it) and set
+    // this to that measured value.
+    //
+    //   distances doubled  -> this constant is HALF of the true square size
+    //                         -> multiply it by 2
+    //   distances halved   -> this constant is DOUBLE the true square size
+    //                         -> divide it by 2
+    //
+    // IMPORTANT: after changing this value you MUST re-run live calibration
+    // (USE_PREDETERMINED_HOMOGRAPHY = false) and re-copy the resulting
+    // H_ARRAY from telemetry. Simply editing this constant does NOT retroactively
+    // fix a homography matrix that was already computed/copied using the old
+    // value — the old H_ARRAY has the wrong scale baked into it permanently.
+    // -------------------------------------------------------------------------
+    private static final float SQUARE_SIZE_INCHES = 1.0f; // TODO: verify against your physical board
     private static final int   DETECTION_FRAME_INTERVAL = 3;
     private static final int   FRAMES_TO_CONFIRM = 5;
 
@@ -292,7 +354,12 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
         // would otherwise fuse separate balls into one undetectable blob.
         Imgproc.morphologyEx(filledMask, holeFilled, Imgproc.MORPH_CLOSE, HOLE_KERNEL);
 
-        input.copyTo(displayImage);
+        // PERFORMANCE: only copy the full-resolution input when it will
+        // actually be used. MASK mode overwrites displayImage entirely a few
+        // lines below, so copying `input` into it here was wasted work.
+        if (DISPLAY_MODE != DisplayMode.MASK) {
+            input.copyTo(displayImage);
+        }
 
         List<BallResult> results = new ArrayList<>();
 
@@ -367,11 +434,32 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
                 double minArea = frameArea * MIN_AREA_FRACTION;
                 double maxArea = frameArea * MAX_AREA_FRACTION;
 
+                // PERFORMANCE: process each ball within a small ROI (region of
+                // interest) around its seed instead of operating on the whole
+                // frame. Previously, Core.compare/copyTo/minMaxLoc all ran on
+                // full-size Mats once PER BALL — with N balls that's N passes
+                // over the entire frame. A ROI sized generously around each
+                // seed (using MAX_AREA_FRACTION as an upper bound on ball
+                // size) cuts that down to a small crop per ball, independent
+                // of how many balls are in the frame.
+                int maxBallDim = (int) Math.ceil(Math.sqrt(maxArea)) * 2;
+                int roiPad = Math.max(8, maxBallDim);
+
                 for (double[] seed : seedCenters) {
                     int label = (int) seed[2];
+                    int seedCx = (int) seed[0];
+                    int seedCy = (int) seed[1];
 
+                    int roiX = Math.max(0, seedCx - roiPad);
+                    int roiY = Math.max(0, seedCy - roiPad);
+                    int roiW = Math.min(freshMarkers.cols() - roiX, roiPad * 2);
+                    int roiH = Math.min(freshMarkers.rows() - roiY, roiPad * 2);
+                    if (roiW <= 0 || roiH <= 0) continue;
+                    Rect roi = new Rect(roiX, roiY, roiW, roiH);
+
+                    Mat markersRoi = freshMarkers.submat(roi);
                     Mat regionMask = new Mat();
-                    Core.compare(freshMarkers, new Scalar(label), regionMask, Core.CMP_EQ);
+                    Core.compare(markersRoi, new Scalar(label), regionMask, Core.CMP_EQ);
                     regionMask.convertTo(regionMask, CvType.CV_8U, 255);
 
                     List<MatOfPoint> regionContours = new ArrayList<>();
@@ -396,8 +484,10 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
                             : 0;
                     if (circularity < MIN_CIRCULARITY) { regionMask.release(); continue; }
 
-                    Mat regionDist = new Mat(distMat.size(), distMat.type(), Scalar.all(0));
-                    distMat.copyTo(regionDist, regionMask);
+                    // Distance-transform peak, also restricted to the same ROI
+                    Mat distRoi = distMat.submat(roi);
+                    Mat regionDist = new Mat(distRoi.size(), distRoi.type(), Scalar.all(0));
+                    distRoi.copyTo(regionDist, regionMask);
                     double peak = Core.minMaxLoc(regionDist).maxVal;
                     regionDist.release();
                     regionMask.release();
@@ -407,17 +497,27 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
                     if (roundness < MIN_ROUNDNESS_RATIO) continue;
 
                     BallResult result = new BallResult();
-                    result.contourSmall = contour;
 
-                    org.opencv.imgproc.Moments m = Imgproc.moments(contour);
+                    // The contour was found within a cropped ROI submat, so its
+                    // point coordinates are ROI-local. Offset every point by the
+                    // ROI's top-left corner to get back to full-small-image
+                    // coordinates before storing/using them anywhere downstream.
+                    Point[] roiLocalPts = contour.toArray();
+                    Point[] offsetPts = new Point[roiLocalPts.length];
+                    for (int i = 0; i < roiLocalPts.length; i++) {
+                        offsetPts[i] = new Point(roiLocalPts[i].x + roi.x, roiLocalPts[i].y + roi.y);
+                    }
+                    MatOfPoint offsetContour = new MatOfPoint(offsetPts);
+                    result.contourSmall = offsetContour;
+
+                    org.opencv.imgproc.Moments m = Imgproc.moments(offsetContour);
                     result.centerSmall = new Point(
                             m.m00 != 0 ? m.m10 / m.m00 : seed[0],
                             m.m00 != 0 ? m.m01 / m.m00 : seed[1]);
 
-                    Point[] contourPoints = contour.toArray();
-                    double contactX = contourPoints[0].x;
-                    double contactY = contourPoints[0].y;
-                    for (Point p : contourPoints) {
+                    double contactX = offsetPts[0].x;
+                    double contactY = offsetPts[0].y;
+                    for (Point p : offsetPts) {
                         if (p.y > contactY) {
                             contactY = p.y;
                             contactX = p.x;
@@ -448,8 +548,14 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
             upscaledMask.release();
         }
 
-        for (BallResult r : results) {
-            drawBallOverlay(displayImage, r);
+        if (DISPLAY_MODE == DisplayMode.BOX) {
+            for (int i = 0; i < results.size(); i++) {
+                drawBallBox(displayImage, results.get(i), i);
+            }
+        } else {
+            for (BallResult r : results) {
+                drawBallOverlay(displayImage, r);
+            }
         }
 
         drawOriginCrosshair(displayImage);
@@ -490,6 +596,73 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
         Imgproc.putText(displayImage, label,
                 new Point(contactFull.x + 8, contactFull.y),
                 Imgproc.FONT_HERSHEY_SIMPLEX, 0.5, new Scalar(255, 255, 255), 1);
+    }
+
+    /**
+     * BOX display mode: draws a clean axis-aligned bounding rectangle around
+     * the ball (derived from its contour, scaled to full resolution) plus a
+     * solid label plate directly above the box showing the ball's index and
+     * its calculated field coordinates. The plate is sized to the text it
+     * contains and clamped to stay within the frame so it's always readable.
+     */
+    private void drawBallBox(Mat displayImage, BallResult r, int ballIndex) {
+        double scaleUp = 1.0 / DETECTION_SCALE;
+
+        // Scale the contour to full resolution, then take its bounding rect.
+        Point[] smallPts = r.contourSmall.toArray();
+        Point[] fullPts  = new Point[smallPts.length];
+        for (int i = 0; i < smallPts.length; i++) {
+            fullPts[i] = new Point(smallPts[i].x * scaleUp, smallPts[i].y * scaleUp);
+        }
+        Rect box = Imgproc.boundingRect(new MatOfPoint(fullPts));
+
+        Scalar boxColor  = new Scalar(0, 255, 0);   // green
+        Scalar textColor = new Scalar(255, 255, 255); // white
+
+        // Bounding box
+        Imgproc.rectangle(displayImage,
+                new Point(box.x, box.y),
+                new Point(box.x + box.width, box.y + box.height),
+                boxColor, 2);
+
+        // Label text: ball number + field coordinates
+        String label = String.format("#%d (%.1f, %.1f)in", ballIndex, r.fieldPoint.x, r.fieldPoint.y);
+
+        int fontFace = Imgproc.FONT_HERSHEY_SIMPLEX;
+        double fontScale = 0.5;
+        int thickness = 1;
+        int[] baseline = new int[1];
+        Size textSize = Imgproc.getTextSize(label, fontFace, fontScale, thickness, baseline);
+
+        int padding = 4;
+        int plateWidth  = (int) textSize.width  + padding * 2;
+        int plateHeight = (int) textSize.height + baseline[0] + padding * 2;
+
+        // Place the plate directly above the box, matching the box width if
+        // the box is wider than the text needs, otherwise sized to the text.
+        int plateDrawWidth = Math.max(plateWidth, box.width);
+        int plateX = box.x;
+        int plateY = box.y - plateHeight;
+
+        // Clamp so the plate never draws off the top or side edges of the frame
+        if (plateY < 0) plateY = box.y + box.height + 2; // fall back to below the box
+        if (plateX + plateDrawWidth > displayImage.cols()) {
+            plateX = displayImage.cols() - plateDrawWidth;
+        }
+        if (plateX < 0) plateX = 0;
+
+        // Solid background plate for legible text over any background
+        Imgproc.rectangle(displayImage,
+                new Point(plateX, plateY),
+                new Point(plateX + plateDrawWidth, plateY + plateHeight),
+                boxColor, -1);
+
+        // Text, vertically centered in the plate, left-aligned with padding
+        Point textOrigin = new Point(
+                plateX + padding,
+                plateY + plateHeight - padding - baseline[0]);
+        Imgproc.putText(displayImage, label, textOrigin,
+                fontFace, fontScale, textColor, thickness);
     }
 
     private Point transformPointToField(double x, double y) {
