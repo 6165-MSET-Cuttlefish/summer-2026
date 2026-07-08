@@ -1,83 +1,148 @@
 package org.firstinspires.ftc.teamcode.Spline.Field;
 
-import static org.firstinspires.ftc.teamcode.Spline.Field.FieldVisualizerFlat.getRobotPose;
-
 import com.acmerobotics.dashboard.FtcDashboard;
+import com.acmerobotics.dashboard.config.Config;
 import com.acmerobotics.dashboard.telemetry.TelemetryPacket;
 import com.pedropathing.follower.Follower;
+import com.pedropathing.geometry.BezierCurve;
 import com.pedropathing.geometry.BezierLine;
 import com.pedropathing.geometry.Pose;
+import com.pedropathing.paths.PathBuilder;
 import com.pedropathing.paths.PathChain;
+import com.pedropathing.util.Timer;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 
 import org.firstinspires.ftc.teamcode.Spline.Pedro.PedroSetup;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
- * BallCollectionOpMode
- * ---------------------
- * Press gamepad1.a to start the automated ball-collection sequence.
- * The robot does NOT move until that button is pressed — follower.update()
- * is only called once a path is actually running.
+ * BallCollectionOpMode — pre-built PathChains, zero planning after start.
+ * -----------------------------------------------------------------------------
+ * LIFECYCLE (this is the key structural guarantee):
  *
- * BUTTON BINDING
- *   gamepad1.a — start / restart the collection path from the robot's
- *                current position at the moment of the press.
+ *   WHILE IDLE  — the route is planned and ALL PathChains are FULLY BUILT
+ *                 ahead of time, from the current Dashboard positions. The
+ *                 finished spline is drawn on the Field view so you can see
+ *                 exactly what will run BEFORE pressing A. Rebuilding only
+ *                 happens when a Dashboard value actually changes (robot,
+ *                 ball, or obstacle moved) — not every loop.
  *
- * HEADING CONVENTION (Pedro Pathing 2.x)
- *   Radians, CCW positive, 0 = facing +X.
- *   The intake heading for each leg is atan2(dy, dx) pointing straight
- *   at the target, so the full 18-inch front face sweeps through the ball.
+ *   PRESS A     — does NOTHING except follower.followPath(legChains.get(0)).
+ *                 No planning, no searching, no path construction. The
+ *                 chains being followed are the exact frozen objects built
+ *                 while idle.
  *
- * PEDRO 2.x API NOTES
- *   - BezierLine takes Pose directly (no Point wrapper needed).
- *   - Drawing class is in the telemetry artifact and manages its own packet;
- *     we draw the live robot directly onto our Canvas instead via
- *     FieldVisualizer.drawLiveRobotOnCanvas().
+ *   WHILE       — the only per-loop calls are follower.update() and the
+ *   RUNNING       pathState FSM that starts the NEXT pre-built chain when
+ *                 the current one finishes (!isBusy(), standard Pedro auto
+ *                 style). The paths are never modified, replanned, or
+ *                 regenerated after A. Guaranteed.
  *
- * DASHBOARD
- *   One TelemetryPacket per loop: FieldVisualizer draws field objects and
- *   dashed path-status lines; drawLiveRobotOnCanvas adds the live robot
- *   circle on the same overlay; then one sendTelemetryPacket().
+ * PATH STRUCTURE — exactly the Pedro auto pattern:
+ *   Each leg is ONE path in ONE PathChain:
+ *     BezierCurve( startPoint, controlPoint(s)..., endPoint )
+ *   or BezierLine( startPoint, endPoint ) when the leg is a clear straight
+ *   shot. The control points are the obstacle detour points found by the
+ *   visibility-graph planner AT BUILD TIME (while idle), then frozen.
+ *     legChains[0]  Robot  → Ball A
+ *     legChains[1]  Ball A → Ball B
+ *     legChains[2]  Ball B → Ball C
+ *     legChains[3]  Ball C → return (start pose)
+ *   Ball order is chosen at build time over all 3! = 6 possibilities.
+ *
+ * DASHBOARD:
+ *   IDLE:           BLUE robot square (drag it — the route rebuilds and the
+ *                   blue spline preview updates), spline + anchor circles.
+ *   RUNNING / DONE: GREEN live robot square only; the same frozen spline
+ *                   stays drawn so you can watch the robot trace it.
+ *
+ * STOP GUARANTEE:
+ *   Per-leg completion = !isBusy() OR at-endpoint-and-stopped OR per-leg
+ *   timeout. After the last leg: follower.breakFollowing() (all drive
+ *   output zeroed) and update() stops being called. Dead stop.
  */
+@Config
 @TeleOp(name = "Ball Collection", group = "Spline")
 public class BallCollectionOpMode extends OpMode {
 
+    // ── Completion tuning (dashboard-editable) ────────────────────────────────
+    public static double LEG_TIMEOUT_MIN_SEC        = 4.0;
+    public static double TIMEOUT_MIN_AVG_SPEED_IPS  = 10.0;
+    public static double END_DISTANCE_TOLERANCE_IN  = 2.0;
+    public static double END_VELOCITY_TOLERANCE     = 1.0;
+
+    // ── Spline safety tuning ──────────────────────────────────────────────────
+    public static int    CURVE_CHECK_SAMPLES     = 60;
+    public static int    CURVE_REPAIR_ITERATIONS = 10;
+    public static double CURVE_REPAIR_STEP_IN    = 3.0;
+
+    /** Legs shorter than this are skipped as already-complete (avoids NaN). */
+    public static double MIN_LEG_LENGTH_IN = 1.0;
+
     // ── Pedro Pathing ─────────────────────────────────────────────────────────
     private Follower follower;
+    private final Timer pathTimer = new Timer();
 
-    // ── State machine ─────────────────────────────────────────────────────────
-    //   IDLE    – OpMode is running but robot is stationary, waiting for A
-    //   RUNNING – follower is actively executing the PathChain
-    //   DONE    – PathChain finished; follower holds the end pose
-    private enum State { IDLE, RUNNING, DONE }
-    private State state = State.IDLE;
+    // ── FSM: -1 idle · 0..n-1 following legChains[pathState] · n done ────────
+    private int pathState = -1;
 
-    private PathChain collectionChain;
+    // Pre-built while IDLE; frozen the moment A is pressed.
+    private final List<PathChain> legChains   = new ArrayList<>();
+    private final List<Pose>      legEndPoses = new ArrayList<>();
+    private final List<Double>    legTimeouts = new ArrayList<>();
 
-    // Captured once in init(); used as the return waypoint at the end of the chain
     private Pose startPose;
+    private boolean planReady = false;
 
-    // ── Button-edge detection ─────────────────────────────────────────────────
+    // Change detection: rebuild only when Dashboard values actually change.
+    private double lastConfigSignature = Double.NaN;
+
+    // Telemetry / drawing
+    private RouteOptimizer.Route lastRoute;
+    private List<Pose> splineSamples;
+    private List<Pose> legAnchors;
+    private double lastPlanningTimeMs;
+    private String lastLegEndReason = "";
+    private int legsFallenBackToLines = 0;
+
     private boolean prevA = false;
 
+    private boolean isIdle()    { return pathState == -1; }
+    private boolean isDone()    { return !legChains.isEmpty() && pathState >= legChains.size(); }
+    private boolean isRunning() { return pathState >= 0 && pathState < legChains.size(); }
+
     // =========================================================================
-    //  init
+    //  init / start
     // =========================================================================
     @Override
     public void init() {
         follower = PedroSetup.createFollower(hardwareMap);
-
-        // Seed the localizer from the Dashboard-editable robot position.
-        // For a fixed competition starting pose replace with:
-        //   startPose = new Pose(<x>, <y>, Math.toRadians(<deg>));
         startPose = FieldVisualizer.getRobotPose();
         follower.setStartingPose(startPose);
 
-        // Do NOT call follower.update() here — robot must stay still until A is pressed.
+        // Build the full route + PathChains right now, before A is ever
+        // pressed. init_loop/loop keep it in sync with Dashboard edits.
+        rebuildPlan(startPose);
 
-        telemetry.addLine("Ready. Press A on gamepad 1 to start collection.");
+        telemetry.addLine("Path pre-built. Drag things on the Dashboard to update it,");
+        telemetry.addLine("then press A on gamepad 1 to run the pre-built path.");
         telemetry.update();
+    }
+
+    /** Keep the pre-built plan synced with Dashboard edits during INIT too. */
+    @Override
+    public void init_loop() {
+        rebuildIfConfigChanged();
+        drawDashboard(startPose);
+    }
+
+    /** Re-apply seed pose after the Pinpoint's ~0.25s calibration window. */
+    @Override
+    public void start() {
+        follower.setStartingPose(startPose);
     }
 
     // =========================================================================
@@ -86,108 +151,355 @@ public class BallCollectionOpMode extends OpMode {
     @Override
     public void loop() {
 
-        // ── 1. Button-edge: A starts / restarts the path ──────────────────────
+        // While idle, keep the pre-built plan in sync with Dashboard edits.
+        // While running/done: NEVER rebuild — the chains are frozen.
+        if (isIdle()) {
+            rebuildIfConfigChanged();
+        }
+
         boolean currA = gamepad1.a;
         if (currA && !prevA) {
-            buildAndStartPath();
+            startPrebuiltPath();
         }
         prevA = currA;
 
-        // ── 2. Only drive the follower while a path is active ─────────────────
-        //    Calling follower.update() in IDLE lets Pedro's position controller
-        //    fight to hold its zero pose, which would move the robot immediately.
-        if (state == State.RUNNING || state == State.DONE) {
+        if (isRunning()) {
             follower.update();
+            autonomousPathUpdate();
         }
 
-        // ── 3. Detect path completion ─────────────────────────────────────────
-        if (state == State.RUNNING && !follower.isBusy()) {
-            state = State.DONE;
+        Pose displayPose = isIdle() ? startPose : follower.getPose();
+        drawDashboard(displayPose);
+        driverHubTelemetry(displayPose);
+    }
+
+    // =========================================================================
+    //  startPrebuiltPath — the A press. Follows the already-built chain.
+    //  NO planning happens here.
+    // =========================================================================
+    private void startPrebuiltPath() {
+        if (isIdle()) {
+            if (!planReady) return; // nothing valid to run
+            // The seed pose the plan was built from is the robot's position.
+            follower.setStartingPose(startPose);
+        } else if (isDone()) {
+            // Re-running after a finished route: rebuild ONCE from wherever
+            // the robot actually ended up, then run those new chains. This
+            // is the only rebuild outside IDLE, and it happens strictly
+            // before following starts — never mid-drive.
+            startPose = follower.getPose();
+            rebuildPlan(startPose);
+            if (!planReady) return;
+        } else {
+            return; // already running — ignore A
         }
 
-        // ── 4. Sync FieldVisualizer robot marker with Pedro's live pose ────────
-        Pose livePose = follower.getPose();
-        FieldVisualizer.robotX          = livePose.getX();
-        FieldVisualizer.robotY          = livePose.getY();
-        FieldVisualizer.robotHeadingDeg = Math.toDegrees(livePose.getHeading());
+        pathState = 0;
+        follower.followPath(legChains.get(0), false);
+        pathTimer.resetTimer();
+        lastLegEndReason = "";
+    }
 
-        // ── 5. One unified Dashboard packet ───────────────────────────────────
-        //    FieldVisualizer.draw() applies the canvas transform and draws all
-        //    field objects. drawLiveRobotOnCanvas() then draws the Pedro robot
-        //    circle on the same already-transformed overlay. One send at the end.
+    // =========================================================================
+    //  autonomousPathUpdate — standard Pedro FSM over the pre-built chains.
+    // =========================================================================
+    private void autonomousPathUpdate() {
+        String done = legComplete();
+        if (done == null) return;
+
+        lastLegEndReason = done;
+        pathState++;
+
+        if (pathState < legChains.size()) {
+            follower.followPath(legChains.get(pathState), false);
+            pathTimer.resetTimer();
+        } else {
+            follower.breakFollowing(); // zero all drive output — dead stop
+        }
+    }
+
+    /** Reason string if the CURRENT leg is complete, else null. */
+    private String legComplete() {
+        if (!follower.isBusy()) {
+            return "isBusy() false";
+        }
+
+        Pose end = legEndPoses.get(pathState);
+        Pose now = follower.getPose();
+        double distToEnd = Math.hypot(now.getX() - end.getX(), now.getY() - end.getY());
+        double speed = follower.getVelocity().getMagnitude();
+        if (distToEnd <= END_DISTANCE_TOLERANCE_IN && speed <= END_VELOCITY_TOLERANCE) {
+            return String.format("at endpoint (%.1f in, %.1f in/s)", distToEnd, speed);
+        }
+
+        double timeout = legTimeouts.get(pathState);
+        if (pathTimer.getElapsedTimeSeconds() > timeout) {
+            return String.format("LEG TIMEOUT %.1fs", timeout);
+        }
+
+        return null;
+    }
+
+    // =========================================================================
+    //  Change detection — rebuild the plan only when a Dashboard value that
+    //  affects it actually changes. Cheap signature over every input.
+    // =========================================================================
+    private void rebuildIfConfigChanged() {
+        double sig = configSignature();
+        if (sig != lastConfigSignature) {
+            startPose = FieldVisualizer.getRobotPose();
+            follower.setStartingPose(startPose);
+            rebuildPlan(startPose);
+            lastConfigSignature = sig;
+        }
+    }
+
+    private double configSignature() {
+        double sig = 17;
+        for (Ball b : FieldVisualizer.getBalls()) {
+            sig = sig * 31 + b.x;
+            sig = sig * 31 + b.y;
+        }
+        for (Obstacle o : FieldVisualizer.getObstacles()) {
+            sig = sig * 31 + o.x;
+            sig = sig * 31 + o.y;
+            sig = sig * 31 + o.radius;
+        }
+        sig = sig * 31 + FieldVisualizer.robotX;
+        sig = sig * 31 + FieldVisualizer.robotY;
+        sig = sig * 31 + FieldVisualizer.robotHeadingDeg;
+        sig = sig * 31 + FieldVisualizer.CLEARANCE_IN;
+        return sig;
+    }
+
+    // =========================================================================
+    //  rebuildPlan — plan the route AND fully build every PathChain, from
+    //  the given start pose. Only ever called while NOT driving.
+    // =========================================================================
+    private void rebuildPlan(Pose from) {
+        long t0 = System.nanoTime();
+        planReady = false;
+
+        List<Obstacle> obstacles = FieldVisualizer.getObstacles();
+        double clearance = FieldVisualizer.CLEARANCE_IN;
+        Ball[] balls = FieldVisualizer.getBalls().toArray(new Ball[0]);
+
+        RouteOptimizer.Route route =
+                RouteOptimizer.findOptimalRoute(from, balls, from, obstacles, clearance);
+
+        if (route == null) {
+            lastRoute = null;
+            splineSamples = null;
+            legAnchors = null;
+            legChains.clear();
+            lastPlanningTimeMs = (System.nanoTime() - t0) / 1_000_000.0;
+            return;
+        }
+        lastRoute = route;
+
+        buildPaths(from, route, obstacles, clearance);
+        planReady = !legChains.isEmpty();
+
+        lastPlanningTimeMs = (System.nanoTime() - t0) / 1_000_000.0;
+    }
+
+    // =========================================================================
+    //  buildPaths — one PathChain per leg; each chain is a single path with
+    //  a start point, an end point, and the detour control points between.
+    // =========================================================================
+    private void buildPaths(Pose robotNow, RouteOptimizer.Route route,
+                            List<Obstacle> obstacles, double clearance) {
+        legChains.clear();
+        legEndPoses.clear();
+        legTimeouts.clear();
+        legsFallenBackToLines = 0;
+
+        splineSamples = new ArrayList<>();
+        legAnchors = new ArrayList<>();
+        splineSamples.add(robotNow);
+
+        Pose legStart = robotNow;
+
+        for (VisibilityGraphPlanner.PlanResult leg : route.legs) {
+            List<Pose> wp = leg.waypoints;
+            Pose legEnd = wp.get(wp.size() - 1);
+
+            // Skip degenerate legs (coincident balls) — a zero-length
+            // BezierLine(p, p) NaNs Pedro's parameterization.
+            if (Math.hypot(legEnd.getX() - legStart.getX(),
+                    legEnd.getY() - legStart.getY()) < MIN_LEG_LENGTH_IN) {
+                continue;
+            }
+
+            double startHeading = legStart.getHeading();
+            double endHeading   = legEnd.getHeading();
+
+            PathBuilder builder = follower.pathBuilder();
+
+            if (wp.size() <= 2) {
+                // Start point + end point, no control points needed.
+                builder.addPath(new BezierLine(legStart, legEnd))
+                        .setLinearHeadingInterpolation(startHeading, endHeading);
+                splineSamples.add(legEnd);
+            } else {
+                // Start point + control points + end point, one BezierCurve.
+                List<Pose> controls = new ArrayList<>(wp.subList(1, wp.size() - 1));
+                boolean safe = repairCurve(legStart, controls, legEnd, obstacles, clearance);
+
+                if (safe) {
+                    Pose[] curvePoses = new Pose[controls.size() + 2];
+                    curvePoses[0] = legStart;
+                    for (int i = 0; i < controls.size(); i++) curvePoses[i + 1] = controls.get(i);
+                    curvePoses[curvePoses.length - 1] = legEnd;
+
+                    builder.addPath(new BezierCurve(curvePoses))
+                            .setLinearHeadingInterpolation(startHeading, endHeading);
+                    sampleCurveInto(splineSamples, curvePoses);
+                } else {
+                    // Unrepairable curve — known-safe polyline fallback for
+                    // this one leg (still a single pre-built PathChain).
+                    legsFallenBackToLines++;
+                    Pose prev = legStart;
+                    for (int i = 1; i < wp.size(); i++) {
+                        Pose next = wp.get(i);
+                        builder.addPath(new BezierLine(prev, next))
+                                .setLinearHeadingInterpolation(prev.getHeading(), next.getHeading());
+                        splineSamples.add(next);
+                        prev = next;
+                    }
+                }
+            }
+
+            legChains.add(builder.build());
+            legEndPoses.add(legEnd);
+            legTimeouts.add(Math.max(LEG_TIMEOUT_MIN_SEC,
+                    leg.length / TIMEOUT_MIN_AVG_SPEED_IPS));
+            legAnchors.add(legEnd);
+
+            legStart = legEnd;
+        }
+    }
+
+    // =========================================================================
+    //  Curve safety (runs at BUILD time only, never while driving)
+    // =========================================================================
+    private boolean repairCurve(Pose start, List<Pose> controls, Pose end,
+                                List<Obstacle> obstacles, double clearance) {
+        for (int iter = 0; iter <= CURVE_REPAIR_ITERATIONS; iter++) {
+            Obstacle clipped = firstCurveCollision(start, controls, end, obstacles, clearance);
+            if (clipped == null) return true;
+            if (iter == CURVE_REPAIR_ITERATIONS) break;
+
+            for (int i = 0; i < controls.size(); i++) {
+                Pose c = controls.get(i);
+                double dx = c.getX() - clipped.x;
+                double dy = c.getY() - clipped.y;
+                double d = Math.hypot(dx, dy);
+                double ux, uy;
+                if (d < 1e-6) { ux = 1; uy = 0; } else { ux = dx / d; uy = dy / d; }
+                double nx = clamp(c.getX() + ux * CURVE_REPAIR_STEP_IN, 0, 144);
+                double ny = clamp(c.getY() + uy * CURVE_REPAIR_STEP_IN, 0, 144);
+                controls.set(i, new Pose(nx, ny, c.getHeading()));
+            }
+        }
+        return false;
+    }
+
+    private Obstacle firstCurveCollision(Pose start, List<Pose> controls, Pose end,
+                                         List<Obstacle> obstacles, double clearance) {
+        int nPts = controls.size() + 2;
+        double[] px = new double[nPts];
+        double[] py = new double[nPts];
+        px[0] = start.getX();  py[0] = start.getY();
+        for (int i = 0; i < controls.size(); i++) {
+            px[i + 1] = controls.get(i).getX();
+            py[i + 1] = controls.get(i).getY();
+        }
+        px[nPts - 1] = end.getX();  py[nPts - 1] = end.getY();
+
+        for (int s = 0; s <= CURVE_CHECK_SAMPLES; s++) {
+            double t = (double) s / CURVE_CHECK_SAMPLES;
+            double bx = bezierPoint(px, t);
+            double by = bezierPoint(py, t);
+            for (Obstacle o : obstacles) {
+                double d = Math.hypot(bx - o.x, by - o.y);
+                if (d <= o.radius + clearance) return o;
+            }
+        }
+        return null;
+    }
+
+    private static double bezierPoint(double[] pts, double t) {
+        double[] tmp = pts.clone();
+        for (int level = tmp.length - 1; level > 0; level--) {
+            for (int i = 0; i < level; i++) {
+                tmp[i] = (1 - t) * tmp[i] + t * tmp[i + 1];
+            }
+        }
+        return tmp[0];
+    }
+
+    private static double clamp(double v, double lo, double hi) {
+        return Math.max(lo, Math.min(hi, v));
+    }
+
+    private void sampleCurveInto(List<Pose> out, Pose[] curvePoses) {
+        double[] px = new double[curvePoses.length];
+        double[] py = new double[curvePoses.length];
+        for (int i = 0; i < curvePoses.length; i++) {
+            px[i] = curvePoses[i].getX();
+            py[i] = curvePoses[i].getY();
+        }
+        int samples = 20;
+        for (int s = 1; s <= samples; s++) {
+            double t = (double) s / samples;
+            out.add(new Pose(bezierPoint(px, t), bezierPoint(py, t), 0));
+        }
+    }
+
+    // =========================================================================
+    //  Dashboard + Driver Hub output
+    // =========================================================================
+    private void drawDashboard(Pose displayPose) {
         TelemetryPacket packet = new TelemetryPacket();
-        FieldVisualizer.draw(packet);
-        FieldVisualizer.drawLiveRobotOnCanvas(packet.fieldOverlay(), livePose);
-        FtcDashboard.getInstance().sendTelemetryPacket(packet);
-
-        // ── 6. Driver Hub telemetry ───────────────────────────────────────────
-        telemetry.addData("State",   state);
-        telemetry.addData("X",       String.format("%.1f in", livePose.getX()));
-        telemetry.addData("Y",       String.format("%.1f in", livePose.getY()));
-        telemetry.addData("Heading", String.format("%.1f deg",
-                Math.toDegrees(livePose.getHeading())));
-        telemetry.addLine("--- Collection Order ---");
-        Ball[] order = FieldVisualizer.getCollectionOrder();
-        for (int i = 0; i < order.length; i++) {
-            telemetry.addData("  Pick " + (i + 1), order[i].toString());
+        boolean showSeedRobot = isIdle();
+        FieldVisualizer.draw(packet, showSeedRobot);
+        FieldVisualizer.drawPlannedPath(packet.fieldOverlay(), splineSamples, legAnchors);
+        if (!showSeedRobot) {
+            FieldVisualizer.drawLiveRobotOnCanvas(packet.fieldOverlay(), displayPose);
         }
-        if (state == State.IDLE) {
-            telemetry.addLine(">> Press A to begin.");
-        } else if (state == State.DONE) {
-            telemetry.addLine(">> Done! Press A to run again.");
+        FtcDashboard.getInstance().sendTelemetryPacket(packet);
+    }
+
+    private void driverHubTelemetry(Pose displayPose) {
+        String stateLabel = isIdle() ? (planReady ? "IDLE (path pre-built)" : "IDLE (no valid path)")
+                : isDone() ? "DONE"
+                : ("LEG " + (pathState + 1) + "/" + legChains.size());
+        telemetry.addData("State",   stateLabel);
+        telemetry.addData("X",       String.format("%.1f in", displayPose.getX()));
+        telemetry.addData("Y",       String.format("%.1f in", displayPose.getY()));
+        telemetry.addData("Heading", String.format("%.1f deg", Math.toDegrees(displayPose.getHeading())));
+        if (lastRoute != null) {
+            telemetry.addLine("--- Pre-built Collection Order ---");
+            for (int i = 0; i < lastRoute.order.length; i++) {
+                telemetry.addData("  Pick " + (i + 1), lastRoute.order[i].toString());
+            }
+            telemetry.addData("Total planned distance", String.format("%.1f in", lastRoute.totalLength));
+            telemetry.addData("Build time", String.format("%.1f ms", lastPlanningTimeMs));
+            if (!lastLegEndReason.isEmpty()) {
+                telemetry.addData("Last leg ended by", lastLegEndReason);
+            }
+            if (legsFallenBackToLines > 0) {
+                telemetry.addData("Legs using line fallback", legsFallenBackToLines);
+            }
+        }
+        if (isIdle()) {
+            telemetry.addLine(planReady
+                    ? ">> Path is pre-built (blue spline). Press A to run it."
+                    : ">> No valid route for this layout — adjust obstacles/balls.");
+        } else if (isDone()) {
+            telemetry.addLine(">> STOPPED. Press A to rebuild from here and run again.");
         }
         telemetry.update();
-    }
-
-    // =========================================================================
-    //  buildAndStartPath
-    //  Route: Robot → Ball[0] → Ball[1] → Ball[2] → StartPose
-    //  Pedro 2.x: BezierLine takes Pose directly, no Point wrapper.
-    // =========================================================================
-    private void buildAndStartPath() {
-        Ball[] order    = FieldVisualizer.getCollectionOrder();
-        Pose   robotNow = getRobotPose();
-
-        double h0      = intakeHeading(robotNow.getX(), robotNow.getY(),
-                order[0].x,      order[0].y);
-        double h1      = intakeHeading(order[0].x, order[0].y,
-                order[1].x, order[1].y);
-        double h2      = intakeHeading(order[1].x, order[1].y,
-                order[2].x, order[2].y);
-        double hReturn = intakeHeading(order[2].x, order[2].y,
-                startPose.getX(), startPose.getY());
-
-        Pose ball0Pose  = new Pose(order[0].x, order[0].y, h0);
-        Pose ball1Pose  = new Pose(order[1].x, order[1].y, h1);
-        Pose ball2Pose  = new Pose(order[2].x, order[2].y, h2);
-        Pose returnPose = new Pose(startPose.getX(), startPose.getY(), hReturn);
-
-        // Pedro 2.x: BezierLine(Pose, Pose) — no Point wrapper required
-        collectionChain = follower.pathBuilder()
-
-                .addPath(new BezierLine(robotNow,  ball0Pose))
-                .setLinearHeadingInterpolation(robotNow.getHeading(),  ball0Pose.getHeading())
-
-                .addPath(new BezierLine(ball0Pose, ball1Pose))
-                .setLinearHeadingInterpolation(ball0Pose.getHeading(), ball1Pose.getHeading())
-
-                .addPath(new BezierLine(ball1Pose, ball2Pose))
-                .setLinearHeadingInterpolation(ball1Pose.getHeading(), ball2Pose.getHeading())
-
-                .addPath(new BezierLine(ball2Pose, returnPose))
-                .setLinearHeadingInterpolation(ball2Pose.getHeading(), returnPose.getHeading())
-
-                .build();
-
-        follower.followPath(collectionChain, true);
-        state = State.RUNNING;
-    }
-
-    // =========================================================================
-    //  intakeHeading — atan2 angle pointing the robot front toward (toX, toY)
-    // =========================================================================
-    private static double intakeHeading(double fromX, double fromY,
-                                        double toX,   double toY) {
-        return Math.atan2(toY - fromY, toX - fromX);
     }
 }
