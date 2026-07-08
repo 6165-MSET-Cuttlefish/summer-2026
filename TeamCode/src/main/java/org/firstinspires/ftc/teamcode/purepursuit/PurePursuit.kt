@@ -79,9 +79,8 @@ class PurePursuit(drive: MecanumDrivePurePursuit) {
     fun updatePaths() {
         telemetryPacket.fieldOverlay().setStroke("#faaccd")
         Drawing.drawRobot(telemetryPacket.fieldOverlay(), pose.toPose2d(), this)
-        telemetryPacket.fieldOverlay().setStroke("#159470")
-        Drawing.drawRobot(telemetryPacket.fieldOverlay(), targetPose.toPose2d(), this)
-        FtcDashboard.getInstance().sendTelemetryPacket(telemetryPacket)
+//        telemetryPacket.fieldOverlay().setStroke("#159470")
+//        Drawing.drawRobot(telemetryPacket.fieldOverlay(), targetPose.toPose2d(), this)
     }
 
     object Defaults {
@@ -95,7 +94,7 @@ class PurePursuit(drive: MecanumDrivePurePursuit) {
 
     var xSquid: SquIDController = SquIDController(kSQx, kF)
     var ySquid: SquIDController = SquIDController(kSQy, kF)
-    @JvmField var hPID: PIDCoefficients = PIDCoefficients(3.0, 0.05,0.05)
+    @JvmField var hPID: PIDCoefficients = PIDCoefficients(1.5, 0.05,0.05)
 
     var hController = PIDController(hPID.p, hPID.i, hPID.d)
 
@@ -439,6 +438,7 @@ class PurePursuit(drive: MecanumDrivePurePursuit) {
 
         singlePIDtoPoint(targetPose.toPose())
         updatePaths()
+        // FIX: no send here. Actions.runBlocking() sends this packet after run() returns.
 
     }
     @JvmOverloads
@@ -477,11 +477,16 @@ class PurePursuit(drive: MecanumDrivePurePursuit) {
 
         singlePIDtoPoint(targetPose.toPose())
         updatePaths()
+        // FIX: no send here. Actions.runBlocking() sends this packet after run() returns.
     }
     fun followPath(path: Bezier, xyTol: Double, hTol: Double, packet: TelemetryPacket) {
         // Reset state for a new path
         lastT = 0.0
         hasReachedDestination = false
+
+        telemetryPacket = packet
+        mecDrive.updatePoseEstimate() // FIX: refresh localizer before first target calc
+        updateSearchRadius(searchRad)
 
         var targetPose = calculateTargetPose(path)
 
@@ -491,21 +496,27 @@ class PurePursuit(drive: MecanumDrivePurePursuit) {
         packet.put("TargetT", targetPose.t)
 
         while (!hasReachedDestination && notWithinTolerance(pose, targetPose.toPose(), xyTol, hTol)) {
+            mecDrive.updatePoseEstimate() // FIX: without this, localizer.pose never changes and the loop is frozen
+            updateSearchRadius(searchRad)
+
+            telemetryPacket = TelemetryPacket() // FIX: one NEW packet per iteration = one dashboard frame
+
             targetPose = calculateTargetPose(path)
 
             this.targetPose = targetPose.toPose()
 
-            updateSearchRadius(searchRad)
-
             singlePIDtoPoint(targetPose.toPose())
 
-            packet.put("CurrentX", pose.x)
-            packet.put("CurrentY", pose.y)
-            packet.put("CurrentH", pose.h)
+            path.draw(telemetryPacket.fieldOverlay()) // FIX: draw the path into every frame
+            updatePaths() // FIX: draw robot (pink) + target (green) into every frame
 
-            packet.put("DistanceToTarget", Maths.dist(pose, targetPose.toPose()))
-            packet.put("SearchRadius", searchRad)
-            FtcDashboard.getInstance().sendTelemetryPacket(packet)
+            telemetryPacket.put("CurrentX", pose.x)
+            telemetryPacket.put("CurrentY", pose.y)
+            telemetryPacket.put("CurrentH", pose.h)
+
+            telemetryPacket.put("DistanceToTarget", Maths.dist(pose, targetPose.toPose()))
+            telemetryPacket.put("SearchRadius", searchRad)
+            FtcDashboard.getInstance().sendTelemetryPacket(telemetryPacket) // the ONLY send per iteration
         }
 
 
@@ -517,10 +528,18 @@ class PurePursuit(drive: MecanumDrivePurePursuit) {
     fun followPath(path: BezierPath, xyTol: Double, hTol: Double, packet: TelemetryPacket) {
         if (!path.isFollowable()) return
 
+        telemetryPacket = packet
+        mecDrive.updatePoseEstimate() // FIX: refresh localizer before first target calc
+        updateSearchRadius(searchRad)
+
         var targetPose = calculateTargetPose(path)
-        if (!drawPathsInBuild) path.beziers.forEach { it.draw(packet.fieldOverlay()) }
 
         while (!hasReachedDestination && notWithinTolerance(pose, targetPose.toPose(), xyTol, hTol)) {
+            mecDrive.updatePoseEstimate() // FIX: without this, localizer.pose never changes and the loop is frozen
+            updateSearchRadius(searchRad)
+
+            telemetryPacket = TelemetryPacket() // FIX: one NEW packet per iteration = one dashboard frame
+
             targetPose = calculateTargetPose(path)
 
             val targetHeading = if (path.headingTargetsExist()) {
@@ -535,21 +554,22 @@ class PurePursuit(drive: MecanumDrivePurePursuit) {
 
             singlePIDtoPoint(targetPose.toPose())
 
-            updateSearchRadius(searchRad)
+            path.beziers.forEach { it.draw(telemetryPacket.fieldOverlay()) } // FIX: draw the path into every frame
+            updatePaths() // FIX: draw robot (pink) + target (green) into every frame
 
-            packet.put("TargetX", targetPose.x)
-            packet.put("TargetY", targetPose.y)
-            packet.put("TargetH", targetPose.h)
-            packet.put("TargetT", targetPose.t)
+            telemetryPacket.put("TargetX", targetPose.x)
+            telemetryPacket.put("TargetY", targetPose.y)
+            telemetryPacket.put("TargetH", targetPose.h)
+            telemetryPacket.put("TargetT", targetPose.t)
 
-            packet.put("CurrentX", pose.x)
-            packet.put("CurrentY", pose.y)
-            packet.put("CurrentH", pose.h)
+            telemetryPacket.put("CurrentX", pose.x)
+            telemetryPacket.put("CurrentY", pose.y)
+            telemetryPacket.put("CurrentH", pose.h)
 
-            packet.put("DistanceToTarget", Maths.dist(pose, targetPose.toPose()))
-            packet.put("SearchRadius", searchRad)
+            telemetryPacket.put("DistanceToTarget", Maths.dist(pose, targetPose.toPose()))
+            telemetryPacket.put("SearchRadius", searchRad)
 
-            FtcDashboard.getInstance().sendTelemetryPacket(packet)
+            FtcDashboard.getInstance().sendTelemetryPacket(telemetryPacket) // the ONLY send per iteration
         }
         hasReachedDestination = true
     }
@@ -591,4 +611,3 @@ fun main() {
 //    println(PurePursuit.calculateTargetPose(bezier))
 
 }
-

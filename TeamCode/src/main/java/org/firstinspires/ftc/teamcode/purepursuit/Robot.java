@@ -355,9 +355,13 @@ public class Robot {
 
             lastTicks = thisTicks;
 
-            telemetry.addData("Filtered Rpm", rpm);
-            telemetry.addData("TargetVel", targetVel);
-            telemetry.update();
+            // FIX: was telemetry.addData(...) + telemetry.update(). When telemetry routes
+            // to the dashboard, every update() sends a packet with an EMPTY field overlay,
+            // erasing the path drawing. Since ScoringLoop runs in RaceActions alongside
+            // PurePursuitAction, it wiped the field every loop. The runner's shared packet
+            // already carries these values to the dashboard.
+            telemetryPacket.put("Filtered Rpm", rpm);
+            telemetryPacket.put("TargetVel", targetVel);
 
             autoPose = drive.localizer.getPose();
 

@@ -20,7 +20,7 @@ public class SquidTuner extends LinearOpMode {
     public static double kF = 0.1;
     public static double polynomial = 1.4;
 
-    public static double hP = 3, hI = 0, hD = 0.05;
+    public static double hP = 2, hI = 0, hD = 0.05;
 
     public static double targetX = 0, targetY = 0, targetH = 0;
     public static boolean random = false;

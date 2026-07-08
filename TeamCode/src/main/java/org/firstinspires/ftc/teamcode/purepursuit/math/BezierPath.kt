@@ -78,6 +78,11 @@ data class BezierPath(val beziers: MutableList<Bezier>): Path {
 //        }
 //    }
 
+    fun reverse(): BezierPath {
+        val curves = beziers.reversed().map { it.reverse() }.toMutableList()
+        return BezierPath(curves)
+    }
+
     fun maxT(): Double {
         return beziers.size.toDouble()
     }
