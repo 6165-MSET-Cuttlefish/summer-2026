@@ -68,8 +68,8 @@ public class FieldVisualizer {
     public static Obstacle obstacle5 = new Obstacle(72, 72, 6.0);
 
     // ---- Robot (editable position/heading, 18x18in footprint) ----
-    public static double robotX        = 72.0;
-    public static double robotY        = 18.0;
+    public static double robotX        = 50;
+    public static double robotY        = 50;
     public static double robotHeadingDeg = 90.0; // 0 = facing +x, CCW positive
     public static double ROBOT_SIZE_IN = 18.0;
 
@@ -234,6 +234,21 @@ public class FieldVisualizer {
      * setTranslation so every call below uses Pedro's [0, 144] coordinates.
      */
     public static void draw(TelemetryPacket packet) {
+        draw(packet, true);
+    }
+
+    /**
+     * Same as {@link #draw(TelemetryPacket)}, but lets the caller choose
+     * whether to draw the dashboard-editable SEED robot square.
+     *
+     * Pass {@code includeSeedRobot = false} once the robot is actually
+     * driving and the live robot is being drawn via
+     * {@link #drawLiveRobotOnCanvas} instead — otherwise the field view shows
+     * two robots (the frozen seed square plus the moving live one), which is
+     * confusing. Pass {@code true} while idle so the seed square is the one
+     * (editable) robot on screen.
+     */
+    public static void draw(TelemetryPacket packet, boolean includeSeedRobot) {
         Canvas         field  = packet.fieldOverlay();
         PathStatus     status = getPathStatus();
         Ball[]         order  = status.order;
@@ -293,8 +308,10 @@ public class FieldVisualizer {
             i++;
         }
 
-        // ── robot ─────────────────────────────────────────────────────────────
-        drawRobot(field);
+        // ── robot (seed pose; skipped while the live robot is drawn instead) ──
+        if (includeSeedRobot) {
+            drawRobot(field);
+        }
 
         // ── telemetry text summary ────────────────────────────────────────────
         packet.addLine("=== Collection Route ===");
@@ -418,6 +435,46 @@ public class FieldVisualizer {
         double frontX = cx + half * cos;
         double frontY = cy + half * sin;
         field.strokeLine(cx, cy, frontX, frontY);
+    }
+
+    /**
+     * Draws the ACTUAL route the robot will drive — the sampled spline
+     * curves from the built PathChains — as a smooth solid blue line.
+     * Because the points passed in are dense samples along each BezierCurve,
+     * the drawn line IS the spline shape, curves and all, not a straight
+     * polyline approximation.
+     *
+     * Optionally pass the leg anchor poses (leg start/end points: robot
+     * start, each ball, return point) to mark them with small hollow
+     * circles, so you can see where one PathChain leg hands off to the next.
+     *
+     * Safe to call with null / too-short lists — it just does nothing.
+     */
+    public static void drawPlannedPath(Canvas field, List<Pose> splineSamples) {
+        drawPlannedPath(field, splineSamples, null);
+    }
+
+    public static void drawPlannedPath(Canvas field, List<Pose> splineSamples,
+                                       List<Pose> legAnchors) {
+        if (splineSamples == null || splineSamples.size() < 2) return;
+
+        // The spline itself: dense samples joined into a smooth curve
+        field.setStroke("#2962FF");
+        field.setStrokeWidth(2);
+        for (int i = 0; i < splineSamples.size() - 1; i++) {
+            Pose a = splineSamples.get(i);
+            Pose b = splineSamples.get(i + 1);
+            field.strokeLine(a.getX(), a.getY(), b.getX(), b.getY());
+        }
+
+        // Leg boundaries: where one PathChain ends and the next begins
+        if (legAnchors != null) {
+            field.setStroke("#0D47A1");
+            field.setStrokeWidth(2);
+            for (Pose p : legAnchors) {
+                field.strokeCircle(p.getX(), p.getY(), 2.5);
+            }
+        }
     }
 
     /**
