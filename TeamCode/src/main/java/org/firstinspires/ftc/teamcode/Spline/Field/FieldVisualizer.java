@@ -55,6 +55,15 @@ public class FieldVisualizer {
 
     public static double FIELD_SIZE_IN = 144.0;
 
+    /**
+     * Display-only rotation of the Dashboard field view, degrees CCW. Rotates
+     * everything drawn (path, robots, balls, obstacles) together so it has no
+     * effect whatsoever on planning or driving — purely where things appear
+     * on screen. Adjust in 90° steps from the Config tab until the view
+     * matches your physical field (e.g. where you want (0,0) to appear).
+     */
+    public static double DISPLAY_ROTATION_DEG = 0.0;
+
     // ---- Balls (3) ----
     public static Ball ball1 = new Ball(24, 24, 2.0);
     public static Ball ball2 = new Ball(100, 30, 2.0);
@@ -255,6 +264,12 @@ public class FieldVisualizer {
         boolean[]      blocked = status.asArray();
 
         // ── canvas transform: shift origin to Pedro's bottom-left (0,0) ──────
+        // DISPLAY_ROTATION_DEG is display-only: it rotates the entire drawn
+        // view (path, robots, balls, obstacles together), changing where
+        // Pedro's (0,0) lands on screen and nothing else. Zero effect on
+        // planning or driving. Tune it live from the Config tab in 90° steps
+        // until the view matches your physical field orientation.
+        field.setRotation(Math.toRadians(DISPLAY_ROTATION_DEG));
         field.setTranslation(-FIELD_SIZE_IN / 2.0, -FIELD_SIZE_IN / 2.0);
         field.setScale(1, 1);
 
