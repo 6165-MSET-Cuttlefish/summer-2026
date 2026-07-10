@@ -61,16 +61,16 @@ public class FieldVisualizer {
     public static Ball ball3 = new Ball(72, 120, 2.0);
 
     // ---- Obstacles (5) ----
-    public static Obstacle obstacle1 = new Obstacle(40, 40, 6.0);
-    public static Obstacle obstacle2 = new Obstacle(100, 40, 6.0);
-    public static Obstacle obstacle3 = new Obstacle(40, 100, 6.0);
-    public static Obstacle obstacle4 = new Obstacle(100, 100, 6.0);
-    public static Obstacle obstacle5 = new Obstacle(72, 72, 6.0);
+    public static Obstacle obstacle1 = new Obstacle(0, 0, 6.0);
+    public static Obstacle obstacle2 = new Obstacle(0, 0, 6.0);
+    public static Obstacle obstacle3 = new Obstacle(0, 0, 6.0);
+    public static Obstacle obstacle4 = new Obstacle(0, 0, 6.0);
+    public static Obstacle obstacle5 = new Obstacle(0, 0, 6.0);
 
     // ---- Robot (editable position/heading, 18x18in footprint) ----
-    public static double robotX        = 50;
-    public static double robotY        = 50;
-    public static double robotHeadingDeg = 90.0; // 0 = facing +x, CCW positive
+    public static double robotX        = 72;
+    public static double robotY        = 72;
+    public static double robotHeadingDeg = 0; // 0 = facing +x, CCW positive
     public static double ROBOT_SIZE_IN = 18.0;
 
     // ---- Clearance used for obstacle checks ----

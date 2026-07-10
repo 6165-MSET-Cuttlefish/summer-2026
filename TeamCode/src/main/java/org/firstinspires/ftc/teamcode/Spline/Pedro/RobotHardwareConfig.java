@@ -36,7 +36,7 @@ public final class RobotHardwareConfig {
             GoBildaPinpointDriver.GoBildaOdometryPods.goBILDA_4_BAR_POD;
 
     public static final GoBildaPinpointDriver.EncoderDirection PINPOINT_FORWARD_DIR =
-            GoBildaPinpointDriver.EncoderDirection.REVERSED;
-    public static final GoBildaPinpointDriver.EncoderDirection PINPOINT_STRAFE_DIR =
             GoBildaPinpointDriver.EncoderDirection.FORWARD;
+    public static final GoBildaPinpointDriver.EncoderDirection PINPOINT_STRAFE_DIR =
+            GoBildaPinpointDriver.EncoderDirection.REVERSED;
 }
