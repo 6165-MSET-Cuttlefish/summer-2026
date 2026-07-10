@@ -1,4 +1,4 @@
-package org.firstinspires.ftc.teamcode.core;
+package org.firstinspires.ftc.teamcode.architecture.core;
 
 import com.acmerobotics.dashboard.FtcDashboard;
 import com.acmerobotics.dashboard.canvas.Canvas;
@@ -20,14 +20,14 @@ import org.firstinspires.ftc.teamcode.architecture.auto.FieldVisualization;
 import org.firstinspires.ftc.teamcode.architecture.telemetry.LoopProfiler;
 import org.firstinspires.ftc.teamcode.architecture.hardware.EnhancedCRServo;
 import org.firstinspires.ftc.teamcode.architecture.hardware.EnhancedMotor;
+import org.firstinspires.ftc.teamcode.architecture.input.InputClock;
 import org.firstinspires.ftc.teamcode.architecture.telemetry.FieldMapRenderer;
 import org.firstinspires.ftc.teamcode.architecture.telemetry.DualTelemetry;
 import org.firstinspires.ftc.teamcode.architecture.telemetry.HtmlFormatter;
-import org.firstinspires.ftc.teamcode.core.action.Action;
-import org.firstinspires.ftc.teamcode.core.action.Actions;
-import org.firstinspires.ftc.teamcode.core.State;
+import org.firstinspires.ftc.teamcode.architecture.action.Action;
+import org.firstinspires.ftc.teamcode.architecture.action.Actions;
 
-import static org.firstinspires.ftc.teamcode.core.Robot.telemetryToggles;
+import static org.firstinspires.ftc.teamcode.architecture.core.Robot.telemetryToggles;
 import static org.firstinspires.ftc.teamcode.architecture.telemetry.HtmlFormatter.*;
 import static org.firstinspires.ftc.teamcode.architecture.OptimizationToggles.*;
 
@@ -54,6 +54,7 @@ public abstract class EnhancedOpMode extends OpMode {
     private final List<Module> modules = new ArrayList<>();
     private List<Module> sortedTelemetryModules;
     private long lastCurrentReadLoop = Long.MIN_VALUE;
+    private int initializedModuleCount = 0;
     private double cachedTotalCurrent = 0.0;
     private VoltageSensor voltageSensor;
     private double voltage = 12.0;
@@ -87,7 +88,6 @@ public abstract class EnhancedOpMode extends OpMode {
 
     protected boolean shouldWriteDuringInit() { return false; }
     protected boolean shouldReadDuringInit() { return true; }
-    protected boolean shouldPreservePosition() { return true; }
 
     protected abstract Robot createRobot() throws InterruptedException;
 
@@ -114,8 +114,12 @@ public abstract class EnhancedOpMode extends OpMode {
 
         autoDiscoverModules();
         initModules();
-        if (telemetrySortModulesOnce) buildSortedTelemetryModules();
         initialize();
+        // Pick up (and initialize) any modules registered/created during initialize(), then build
+        // the sorted telemetry list once all modules — including late ones — are known.
+        autoDiscoverModules();
+        initModules();
+        if (telemetrySortModulesOnce) buildSortedTelemetryModules();
 
         loopTimer.reset();
         gameTimer.reset();
@@ -139,6 +143,9 @@ public abstract class EnhancedOpMode extends OpMode {
 
         clearBulkCaches();
         profiler.mark("clearBulkCaches");
+
+        // New loop tick: edge suppliers (EdgeBooleanSupplier) refresh once against this frame.
+        InputClock.advance();
 
         if (voltageCompensationEnabled) {
             updateVoltageThrottled();
@@ -192,8 +199,12 @@ public abstract class EnhancedOpMode extends OpMode {
         dashboardPoseHistoryLoopCounter = 0;
         loopsSinceFieldRender = Integer.MAX_VALUE;
         lastCurrentReadLoop = Long.MIN_VALUE;
+        // Drop init-phase timings so the first match loops don't average them into loop time.
+        for (int i = 0; i < loopTimes.length; i++) loopTimes[i] = 0.0;
+        loopIndex = 0;
+        profiler.reset();
         Actions.reset();
-        scheduleDefaultActions();
+        scheduleStartupActions();
         onStart();
         loopTimer.reset();
     }
@@ -211,6 +222,9 @@ public abstract class EnhancedOpMode extends OpMode {
 
         clearBulkCaches();
         profiler.mark("clearBulkCaches");
+
+        // New loop tick: edge suppliers (EdgeBooleanSupplier) refresh once against this frame.
+        InputClock.advance();
 
         if (voltageCompensationEnabled) {
             updateVoltageThrottled();
@@ -263,14 +277,10 @@ public abstract class EnhancedOpMode extends OpMode {
         if (robot != null && robot.pathActionScheduler != null) {
             robot.pathActionScheduler.cancelAll();
         }
-        // Modules can put hardware in a safe state with nothing else racing them.
+        // Modules can put hardware in a safe state with nothing else racing them. No try/catch:
+        // a throwing stop() propagates (fail-fast) so the failure surfaces instead of being hidden.
         for (int i = 0; i < modules.size(); i++) {
-            try {
-                modules.get(i).stop();
-            } catch (Exception e) {
-                // One bad module shouldn't block the rest from shutting down.
-                e.printStackTrace();
-            }
+            modules.get(i).stop();
         }
         onEnd();
     }
@@ -332,11 +342,15 @@ public abstract class EnhancedOpMode extends OpMode {
     }
 
     private void initModules() {
-        for (Module m : modules) {
+        // Idempotent: only initialize modules not yet initialized, so calling this twice (before
+        // and after initialize()) doesn't re-run init() on an already-initialized module.
+        for (int i = initializedModuleCount; i < modules.size(); i++) {
+            Module m = modules.get(i);
             m.setTelemetry(telemetry);
             m.initStates();
             m.init();
         }
+        initializedModuleCount = modules.size();
     }
 
     private List<Module> telemetryOrderedModules() {
@@ -376,10 +390,10 @@ public abstract class EnhancedOpMode extends OpMode {
         }
     }
 
-    private void scheduleDefaultActions() {
+    private void scheduleStartupActions() {
         for (Module m : modules) {
-            Action def = m.getDefaultAction();
-            if (def != null && !Actions.isModuleActive(m)) def.schedule();
+            Action startup = m.getStartupAction();
+            if (startup != null && !Actions.isModuleActive(m)) startup.schedule();
         }
     }
 
@@ -395,8 +409,9 @@ public abstract class EnhancedOpMode extends OpMode {
     }
 
     private void updateVoltageThrottled() {
+        int interval = Math.max(1, voltageReadLoopInterval);
         if (voltageLoopCounter == 0) voltage = voltageSensor.getVoltage();
-        voltageLoopCounter = (voltageLoopCounter + 1) % voltageReadLoopInterval;
+        voltageLoopCounter = (voltageLoopCounter + 1) % interval;
     }
 
     private void recordLoopTime() {
@@ -490,12 +505,12 @@ public abstract class EnhancedOpMode extends OpMode {
 
         if (!dashboardSkipGrid) overlay.drawGrid(0, 0, 144, 144, 7, 7);
 
-        FieldVisualization.drawRobot(robot.follower.getPose());
+        FieldVisualization.drawRobot(overlay, robot.follower.getPose());
 
         if (!dashboardSkipPoseHistory) {
             int poseEvery = Math.max(1, dashboardPoseHistoryEveryNLoops);
             if ((dashboardPoseHistoryLoopCounter++ % poseEvery) == 0) {
-                FieldVisualization.drawPoseHistory(robot.follower.getPoseHistory());
+                FieldVisualization.drawPoseHistory(overlay, robot.follower.getPoseHistory());
             }
         }
 

@@ -1,4 +1,4 @@
-package org.firstinspires.ftc.teamcode.core.action;
+package org.firstinspires.ftc.teamcode.architecture.action;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -9,8 +9,8 @@ import java.util.function.BooleanSupplier;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
-import org.firstinspires.ftc.teamcode.core.Module;
-import org.firstinspires.ftc.teamcode.core.State;
+import org.firstinspires.ftc.teamcode.architecture.core.Module;
+import org.firstinspires.ftc.teamcode.architecture.core.State;
 
 public final class ActionBuilder {
     private final List<Action.Step> steps = new ArrayList<>();
@@ -32,7 +32,12 @@ public final class ActionBuilder {
         return this;
     }
 
-    /** Resolve states at execution time; targets are not pre-registered. */
+    /**
+     * Resolve states at execution time. The driven module is unknown at build time, so it is NOT
+     * added to this action's conflict targets — the scheduler can't auto-cancel actions that fight
+     * over it. If the module is known, pass it via {@link #targets(Module)} so conflict-cancellation
+     * and {@code isModuleActive()} bookkeeping still work.
+     */
     @SafeVarargs
     public final ActionBuilder setLazy(Supplier<? extends State>... suppliers) {
         steps.add(new ActivateStateLazy(Arrays.asList(suppliers)));

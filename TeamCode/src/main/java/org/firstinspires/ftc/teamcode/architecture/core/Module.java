@@ -1,4 +1,4 @@
-package org.firstinspires.ftc.teamcode.core;
+package org.firstinspires.ftc.teamcode.architecture.core;
 
 import com.qualcomm.robotcore.util.ElapsedTime;
 import java.util.ArrayDeque;
@@ -11,8 +11,7 @@ import java.util.Map;
 import java.util.function.DoubleSupplier;
 import org.firstinspires.ftc.robotcore.external.Telemetry;
 import org.firstinspires.ftc.teamcode.architecture.telemetry.DualTelemetry;
-import org.firstinspires.ftc.teamcode.core.action.Action;
-import org.firstinspires.ftc.teamcode.core.State;
+import org.firstinspires.ftc.teamcode.architecture.action.Action;
 
 /** Base class for robot subsystem modules. */
 public abstract class Module {
@@ -29,7 +28,7 @@ public abstract class Module {
 
     private final ElapsedTime stateTimer = new ElapsedTime();
     private Telemetry telemetry;
-    private Action defaultAction;
+    private Action startupAction;
     private boolean telemetryEnabled = true;
     private boolean writeEnabled = true;
     private String name;
@@ -155,14 +154,18 @@ public abstract class Module {
 
     public final boolean isInAny(State... checkStates) {
         for (State check : checkStates) {
-            if (getState(check.getClass()).equals(check)) return true;
+            // Look up by keyOf so enum constants with method bodies resolve to their registered
+            // slot; getState(check.getClass()) throws for those (the anonymous subclass isn't a key).
+            State current = stateMap.get(keyOf(check));
+            if (current != null && current.equals(check)) return true;
         }
         return false;
     }
 
     public final boolean isInAll(State... checkStates) {
         for (State check : checkStates) {
-            if (!getState(check.getClass()).equals(check)) return false;
+            State current = stateMap.get(keyOf(check));
+            if (current == null || !current.equals(check)) return false;
         }
         return true;
     }
@@ -272,8 +275,9 @@ public abstract class Module {
     public final void setWriteEnabled(boolean enabled) { this.writeEnabled = enabled; }
     public final boolean isWriteEnabled() { return writeEnabled; }
 
-    public final void setDefaultAction(Action action) { this.defaultAction = action; }
-    public final Action getDefaultAction() { return defaultAction; }
+    /** Action scheduled once at start() (if the module isn't already claimed). NOT re-armed later. */
+    public final void setStartupAction(Action action) { this.startupAction = action; }
+    public final Action getStartupAction() { return startupAction; }
 
     protected final DualTelemetry getDualTelemetry() {
         return telemetry instanceof DualTelemetry ? (DualTelemetry) telemetry : null;

@@ -3,10 +3,10 @@ package org.firstinspires.ftc.teamcode.opmodes.auto;
 import com.pedropathing.geometry.Pose;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 
-import org.firstinspires.ftc.teamcode.core.EnhancedOpMode;
-import org.firstinspires.ftc.teamcode.core.Module;
-import org.firstinspires.ftc.teamcode.core.Robot;
-import org.firstinspires.ftc.teamcode.core.State;
+import org.firstinspires.ftc.teamcode.architecture.core.EnhancedOpMode;
+import org.firstinspires.ftc.teamcode.architecture.core.Module;
+import org.firstinspires.ftc.teamcode.architecture.core.Robot;
+import org.firstinspires.ftc.teamcode.architecture.core.State;
 
 /**
  * Robot for the ported DECODE "Close" auto, running on the summer-2026 scaffold.
@@ -46,9 +46,8 @@ public class CloseRobot extends Robot {
     public RobotActions actions;
 
     public CloseRobot(EnhancedOpMode opMode) throws InterruptedException {
-        // false = don't carry pose from a prior run; the auto seeds the follower from the setup pose
-        // in initialize() anyway.
-        super(opMode, false);
+        // The auto seeds the follower from the setup pose in initialize().
+        super(opMode);
     }
 
     @Override

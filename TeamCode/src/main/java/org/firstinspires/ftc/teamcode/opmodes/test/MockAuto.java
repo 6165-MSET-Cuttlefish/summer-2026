@@ -5,11 +5,11 @@ import com.pedropathing.geometry.Pose;
 import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
 
 import org.firstinspires.ftc.teamcode.architecture.auto.scheduler.PathActionBuilder;
-import org.firstinspires.ftc.teamcode.core.AllianceColor;
-import org.firstinspires.ftc.teamcode.core.Context;
-import org.firstinspires.ftc.teamcode.core.EnhancedOpMode;
-import org.firstinspires.ftc.teamcode.core.Robot;
-import org.firstinspires.ftc.teamcode.core.action.Actions;
+import org.firstinspires.ftc.teamcode.architecture.core.AllianceColor;
+import org.firstinspires.ftc.teamcode.architecture.core.Context;
+import org.firstinspires.ftc.teamcode.architecture.core.EnhancedOpMode;
+import org.firstinspires.ftc.teamcode.architecture.core.Robot;
+import org.firstinspires.ftc.teamcode.architecture.action.Actions;
 
 /**
  * End-to-end smoke test for the summer-2026 framework. One run exercises: the EnhancedOpMode
@@ -50,7 +50,7 @@ public class MockAuto extends EnhancedOpMode {
         Pose start = robot.follower.getPose();
         double heading = start.getHeading();
 
-        PathActionBuilder seq = new PathActionBuilder()
+        PathActionBuilder seq = new PathActionBuilder(robot.follower, () -> (long) getGameTimer().milliseconds())
                 .setStartPose(start)
                 .setState(MockMechanism.Status.ACTIVE)
                 .run(() -> phase = "scheduler started, mech ACTIVE");

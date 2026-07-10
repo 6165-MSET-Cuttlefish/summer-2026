@@ -1,12 +1,12 @@
-package org.firstinspires.ftc.teamcode.core.action;
+package org.firstinspires.ftc.teamcode.architecture.action;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
-import org.firstinspires.ftc.teamcode.core.Module;
-import org.firstinspires.ftc.teamcode.core.State;
+import org.firstinspires.ftc.teamcode.architecture.core.Module;
+import org.firstinspires.ftc.teamcode.architecture.core.State;
 
 /**
  * Single-threaded cooperative scheduler; {@link #update} ticks every active action once.
@@ -16,6 +16,13 @@ public final class Actions {
     private Actions() {}
 
     private static final ArrayList<Action> active = new ArrayList<>();
+
+    // Reentrancy guard: update() iterates `active` by index while ticking, and a Step's
+    // start()/tick() may call schedule()/cancelFor()/cancelAll() reentrantly. Mutating `active`
+    // mid-iteration would skip or double-visit actions, so during update() those calls are queued
+    // here and applied once iteration finishes.
+    private static boolean updating = false;
+    private static final ArrayList<Runnable> deferredOps = new ArrayList<>();
 
     public static Action set(State... states) {
         ActionBuilder b = new ActionBuilder();
@@ -103,6 +110,7 @@ public final class Actions {
     }
 
     static void schedule(Action action) {
+        if (updating) { deferredOps.add(() -> schedule(action)); return; }
         if (action.isEmbedded()) {
             System.err.println("[Actions] Refusing to schedule '" + action.getName()
                     + "': it was composed into another action and shares mutable step state. "
@@ -133,21 +141,41 @@ public final class Actions {
     }
 
     public static void update() {
-        int i = 0;
-        while (i < active.size()) {
-            Action a = active.get(i);
-            if (a.tick()) {
-                // Tick may have already removed us (self-conflicting schedule from within tick).
-                if (i < active.size() && active.get(i) == a) {
-                    active.remove(i);
+        updating = true;
+        try {
+            int i = 0;
+            while (i < active.size()) {
+                Action a = active.get(i);
+                // A throwing step propagates out by design (fail-fast); the finally still clears
+                // the reentrancy guard so a crashed tick can't wedge the scheduler.
+                if (a.tick()) {
+                    // Tick may have already removed us (self-conflicting schedule from within tick).
+                    if (i < active.size() && active.get(i) == a) {
+                        active.remove(i);
+                    }
+                } else {
+                    i++;
                 }
-            } else {
-                i++;
             }
+        } finally {
+            updating = false;
+        }
+        drainDeferredOps();
+    }
+
+    private static void drainDeferredOps() {
+        // Ops may enqueue further ops (e.g. a cancel callback that schedules); drain to empty.
+        while (!deferredOps.isEmpty()) {
+            ArrayList<Runnable> batch = new ArrayList<>(deferredOps);
+            deferredOps.clear();
+            for (int i = 0; i < batch.size(); i++) batch.get(i).run();
         }
     }
 
     public static void cancelAll() {
+        if (updating) { deferredOps.add(Actions::cancelAll); return; }
+        // Drop any ops orphaned by a crashed update() so stale statics can't survive a Sloth reload.
+        deferredOps.clear();
         // Snapshot + clear first so a schedule from a cancel callback lands in an empty list.
         Action[] snapshot = active.toArray(new Action[0]);
         active.clear();
@@ -155,6 +183,11 @@ public final class Actions {
     }
 
     public static void cancelFor(Module... modules) {
+        if (updating) {
+            final Module[] mods = modules;
+            deferredOps.add(() -> cancelFor(mods));
+            return;
+        }
         int i = 0;
         while (i < active.size()) {
             Action a = active.get(i);

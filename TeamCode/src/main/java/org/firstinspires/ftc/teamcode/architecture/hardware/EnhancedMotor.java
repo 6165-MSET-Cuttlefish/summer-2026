@@ -85,6 +85,11 @@ public class EnhancedMotor implements DcMotorEx {
         return cache.voltageCompensationEnabled;
     }
 
+    /**
+     * Raw device for reads or SDK calls this wrapper doesn't proxy. Writing power/velocity
+     * directly through it bypasses the write cache and leaves it stale — prefer this wrapper's
+     * setters, or {@link #setPowerRaw(double)} which keeps the cache in sync.
+     */
     public DcMotorEx getUnderlying() { return motor; }
     public double getCachedPower() { return cache.cached; }
 
@@ -141,7 +146,13 @@ public class EnhancedMotor implements DcMotorEx {
     @Override public int getCurrentPosition() { return motor.getCurrentPosition(); }
 
     @Override public Direction getDirection() { return motor.getDirection(); }
-    @Override public void setDirection(Direction direction) { motor.setDirection(direction); }
+    @Override public void setDirection(Direction direction) {
+        motor.setDirection(direction);
+        // A direction flip changes what the same numeric power/velocity does, but not the number
+        // itself. Drop the caches so the next setPower/setVelocity always re-issues to hardware.
+        cache.store(Double.NaN);
+        cachedVelocity = Double.NaN;
+    }
     @Override public double getPower() { return motor.getPower(); }
 
     @Override public Manufacturer getManufacturer() { return motor.getManufacturer(); }

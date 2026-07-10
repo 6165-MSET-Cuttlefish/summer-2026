@@ -13,10 +13,9 @@ import com.pedropathing.paths.callbacks.PathCallback;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
-import org.firstinspires.ftc.teamcode.core.action.Action;
-import org.firstinspires.ftc.teamcode.core.action.ActionBuilder;
-import org.firstinspires.ftc.teamcode.core.action.Actions;
-import org.firstinspires.ftc.teamcode.core.Robot;
+import org.firstinspires.ftc.teamcode.architecture.action.Action;
+import org.firstinspires.ftc.teamcode.architecture.action.ActionBuilder;
+import org.firstinspires.ftc.teamcode.architecture.action.Actions;
 
 /** Wraps Pedro's {@link PathBuilder} and collects "during" actions for the scheduler. */
 public class TrackingPathBuilder {
@@ -26,10 +25,6 @@ public class TrackingPathBuilder {
     private final List<Action> duringActions = new ArrayList<>();
     private boolean holdEnd = true;
     private Double holdAtDistance = null;
-
-    TrackingPathBuilder(Pose startPose) {
-        this(startPose, Robot.robot.follower.pathBuilder());
-    }
 
     TrackingPathBuilder(Pose startPose, PathBuilder pedroBuilder) {
         this.startPose = startPose;
@@ -297,7 +292,9 @@ public class TrackingPathBuilder {
             try {
                 return condition.call();
             } catch (Exception e) {
-                return false;
+                // Adapt Callable's checked exception to the unchecked BooleanSupplier; propagate
+                // (fail-fast) rather than swallowing a throwing condition into a permanent "false".
+                throw new RuntimeException(e);
             }
         });
         builder.run(code);
@@ -311,7 +308,8 @@ public class TrackingPathBuilder {
             try {
                 return condition.call();
             } catch (Exception e) {
-                return false;
+                // Propagate (fail-fast) instead of swallowing a throwing condition into "false".
+                throw new RuntimeException(e);
             }
         });
         builder.action(action);

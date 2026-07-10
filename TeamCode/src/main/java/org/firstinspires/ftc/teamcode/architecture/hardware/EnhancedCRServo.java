@@ -73,6 +73,11 @@ public class EnhancedCRServo implements CRServo, PwmControl {
         return cache.voltageCompensationEnabled;
     }
 
+    /**
+     * Raw device for reads or SDK calls this wrapper doesn't proxy. Writing power directly through
+     * it bypasses the write cache and leaves it stale — prefer {@link #setPower(double)}, or
+     * {@link #setPowerRaw(double)} which keeps the cache in sync.
+     */
     public CRServoImplEx getUnderlying() { return crServo; }
     public double getCachedPower() { return cache.cached; }
 
@@ -80,7 +85,12 @@ public class EnhancedCRServo implements CRServo, PwmControl {
     @Override public int getPortNumber() { return crServo.getPortNumber(); }
 
     @Override public Direction getDirection() { return crServo.getDirection(); }
-    @Override public void setDirection(Direction direction) { crServo.setDirection(direction); }
+    @Override public void setDirection(Direction direction) {
+        crServo.setDirection(direction);
+        // A direction flip changes what the same numeric power does; drop the cache so the next
+        // setPower always re-issues to hardware.
+        cache.store(Double.NaN);
+    }
 
     @Override public double getPower() { return crServo.getPower(); }
 

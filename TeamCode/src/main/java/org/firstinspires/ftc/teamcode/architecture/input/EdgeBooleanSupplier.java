@@ -12,7 +12,10 @@ public class EdgeBooleanSupplier {
     private boolean toggleTrue;
     private boolean toggleFalse;
     private long timeMarker = 0L;
-    private boolean valid = false;
+    // Last InputClock frame this supplier refreshed on. -1 forces a refresh on first query.
+    // Replaces a write-once boolean that never reset, which froze non-pumped (combinator /
+    // threshold) suppliers after their first read.
+    private long lastUpdatedFrame = -1L;
 
     private long lastRisingEdgeTime = 0L;
     private boolean doubleClickDetected = false;
@@ -65,16 +68,17 @@ public class EdgeBooleanSupplier {
     }
 
     public void invalidate() {
-        // Update immediately so edge state advances even if this supplier isn't queried this frame.
-        update();
-        valid = true;
+        // Refresh eagerly so edge state advances even if this supplier isn't queried this loop, but
+        // at most once per loop: calling update() twice in one loop would advance previous=current
+        // twice and erase the edge just detected. ensureFresh() enforces the once-per-loop guard.
+        ensureFresh();
     }
 
     public void primeToCurrentState() {
         boolean state = booleanSupplier.getAsBoolean();
         previous = state;
         current = state;
-        valid = true;
+        lastUpdatedFrame = InputClock.current();
         doubleClickDetected = false;
         // Preserve toggleTrue/toggleFalse: priming suppresses spurious edges across a layer
         // switch / re-init — it must NOT clear toggle latches the operator already set.
@@ -85,9 +89,10 @@ public class EdgeBooleanSupplier {
     }
 
     private void ensureFresh() {
-        if (!valid) {
+        long frame = InputClock.current();
+        if (lastUpdatedFrame != frame) {
             update();
-            valid = true;
+            lastUpdatedFrame = frame;
         }
     }
 

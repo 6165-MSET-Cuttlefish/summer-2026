@@ -2,7 +2,7 @@ package org.firstinspires.ftc.teamcode.opmodes.auto;
 
 import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
 
-import org.firstinspires.ftc.teamcode.core.AllianceColor;
+import org.firstinspires.ftc.teamcode.architecture.core.AllianceColor;
 
 /**
  * BLUE entry point for the ported "Close" auto. Pins {@link AllianceColor#BLUE} in

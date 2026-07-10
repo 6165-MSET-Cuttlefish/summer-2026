@@ -4,8 +4,8 @@ import com.acmerobotics.dashboard.config.Config;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 
 import org.firstinspires.ftc.teamcode.architecture.hardware.EnhancedMotor;
-import org.firstinspires.ftc.teamcode.core.Module;
-import org.firstinspires.ftc.teamcode.core.State;
+import org.firstinspires.ftc.teamcode.architecture.core.Module;
+import org.firstinspires.ftc.teamcode.architecture.core.State;
 
 /**
  * Mock module for the architecture smoke test. By default it touches no hardware (just drives the
@@ -42,17 +42,18 @@ public class MockMechanism extends Module {
 
     @Override
     protected void read() {
-        // Re-bind only when the dashboard name changes, so a bad name doesn't re-throw every loop.
+        // Re-bind only when the dashboard name changes.
         String name = Tuning.pulseMotorName == null ? "" : Tuning.pulseMotorName.trim();
         if (!name.equals(boundName)) {
             boundName = name;
+            // Safe the previously-bound motor before dropping it, or switching test targets
+            // mid-run leaves the old one spinning (write()/stop() only touch the current motor).
+            if (motor != null) motor.setPower(0.0);
             motor = null;
+            // No try/catch: an unknown hardware name throws (fail-fast) instead of silently
+            // staying hardware-free. boundName is already updated, so it throws once, not every loop.
             if (!name.isEmpty()) {
-                try {
-                    motor = new EnhancedMotor(hardwareMap, name);
-                } catch (Exception e) {
-                    // Unknown name — stay hardware-free instead of crashing the opmode.
-                }
+                motor = new EnhancedMotor(hardwareMap, name);
             }
         }
     }

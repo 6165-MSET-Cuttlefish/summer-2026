@@ -2,8 +2,8 @@ package org.firstinspires.ftc.teamcode.architecture.auto;
 
 import com.pedropathing.geometry.Pose;
 
-import org.firstinspires.ftc.teamcode.core.AllianceColor;
-import org.firstinspires.ftc.teamcode.core.Context;
+import org.firstinspires.ftc.teamcode.architecture.core.AllianceColor;
+import org.firstinspires.ftc.teamcode.architecture.core.Context;
 
 /**
  * Author path geometry for RED; these mirror to BLUE when {@link Context#allianceColor} flips.

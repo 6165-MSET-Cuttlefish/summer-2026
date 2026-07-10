@@ -1,9 +1,9 @@
-package org.firstinspires.ftc.teamcode.core.action;
+package org.firstinspires.ftc.teamcode.architecture.action;
 
 import java.util.List;
 import java.util.Set;
 
-import org.firstinspires.ftc.teamcode.core.Module;
+import org.firstinspires.ftc.teamcode.architecture.core.Module;
 
 /**
  * Composable action: a sequence of steps the {@link Actions} scheduler ticks cooperatively
@@ -112,26 +112,12 @@ public final class Action {
             }
             Step step = steps.get(currentStepIndex);
             if (!stepStarted) {
-                try {
-                    step.start(this);
-                } catch (Exception e) {
-                    logStepFailure(currentStepIndex, e);
-                    try { step.cancel(this); } catch (Exception ignored) {}
-                    cancelled = true;
-                    return true;
-                }
+                // No try/catch by design: a throwing step propagates out of the scheduler so a
+                // broken action surfaces as a crash instead of being silently swallowed/cancelled.
+                step.start(this);
                 stepStarted = true;
             }
-            boolean stepDone;
-            try {
-                stepDone = step.tick(this);
-            } catch (Exception e) {
-                logStepFailure(currentStepIndex, e);
-                try { step.cancel(this); } catch (Exception ignored) {}
-                cancelled = true;
-                return true;
-            }
-            if (!stepDone) return false;
+            if (!step.tick(this)) return false;
             currentStepIndex++;
             stepStarted = false;
         }
@@ -142,28 +128,19 @@ public final class Action {
         return steps.get(currentStepIndex);
     }
 
-    private void logStepFailure(int stepIndex, Exception e) {
-        StringBuilder info = new StringBuilder();
-        if (targets.isEmpty()) {
-            info.append("no targets");
-        } else {
-            info.append("targets: [");
-            int i = 0;
-            for (Module m : targets) {
-                if (i++ > 0) info.append(", ");
-                info.append(m.getName());
-            }
-            info.append(']');
-        }
-        System.err.println("[Action] '" + name + "' failed at step "
-                + (stepIndex + 1) + "/" + steps.size() + " (" + info + "): " + e.getMessage());
-        e.printStackTrace();
-    }
-
     public Action then(Action other) { return Actions.sequence(this, other); }
     public Action with(Action other) { return Actions.parallel(this, other); }
     public Action timeout(long ms) { return Actions.timeout(this, ms); }
-    public Action withName(String newName) { return new Action(steps, targets, newName); }
+
+    /**
+     * Relabelled view sharing this action's (mutable) steps/targets. The source is marked embedded
+     * so only the returned copy can be scheduled — scheduling both would corrupt the shared Step
+     * state (Delay.startMs, Retry.attempts, ...).
+     */
+    public Action withName(String newName) {
+        markEmbedded();
+        return new Action(steps, targets, newName);
+    }
 
     @Override
     public String toString() {

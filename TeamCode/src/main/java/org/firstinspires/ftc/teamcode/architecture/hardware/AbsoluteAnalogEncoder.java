@@ -24,6 +24,10 @@ public class AbsoluteAnalogEncoder implements HardwareDevice {
     private double position;
     private double delta;
 
+    // Reject a per-sample jump larger than this as sensor noise (see getRelativePosition).
+    // Disabled by default (infinite) so behavior is unchanged unless a caller opts in.
+    private double maxDeltaDegrees = Double.POSITIVE_INFINITY;
+
     public AbsoluteAnalogEncoder(AnalogInput analogInput) {
         this(analogInput, 0.0, 1.0, false);
     }
@@ -51,10 +55,27 @@ public class AbsoluteAnalogEncoder implements HardwareDevice {
         if (delta > 180.0) delta -= 360.0;
         if (delta < -180.0) delta += 360.0;
 
+        if (Math.abs(delta) > maxDeltaDegrees) {
+            // Implausible jump for one sample interval — treat as a glitch and skip it. Leave
+            // lastRawAngle at the last good value so a single bad sample can't corrupt position.
+            delta = 0.0;
+            return position * gearRatio;
+        }
+
         position += delta;
         lastRawAngle = rawAngle;
 
         return position * gearRatio;
+    }
+
+    /**
+     * Reject any single-sample shaft delta larger than {@code degrees} as sensor noise. Set this
+     * above the maximum real rotation between two {@link #getRelativePosition()} calls (e.g. shaft
+     * RPM / loop rate) — too low a value freezes accumulation during fast motion. Default: disabled.
+     */
+    public AbsoluteAnalogEncoder withMaxDelta(double degrees) {
+        this.maxDeltaDegrees = degrees;
+        return this;
     }
 
     /** Reset the zero reference to the current shaft angle. */
@@ -81,9 +102,9 @@ public class AbsoluteAnalogEncoder implements HardwareDevice {
     }
 
     protected double getVoltageAsAngle() {
-        double voltage = analogInput.getVoltage();
         double maxVoltage = analogInput.getMaxVoltage();
-        return (voltage / maxVoltage) * 360.0;
+        if (maxVoltage == 0.0) return 0.0;
+        return (analogInput.getVoltage() / maxVoltage) * 360.0;
     }
 
     /** Last shaft delta in degrees from {@link #getRelativePosition()}. */

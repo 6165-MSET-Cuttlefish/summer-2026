@@ -96,14 +96,11 @@ dependencies {
     implementation 'org.firstinspires.ftc:Vision:11.1.0'
     implementation 'androidx.appcompat:appcompat:1.2.0'
 
+    // roadrunner:ftc is needed only by the purepursuit/ experiment tree. The
+    // dashboard exclude is handled globally by configurations.configureEach above.
     implementation "com.acmerobotics.roadrunner:ftc:0.1.25"
     implementation "com.acmerobotics.roadrunner:core:1.0.1"
     implementation "com.acmerobotics.roadrunner:actions:1.0.1"
-//    implementation "com.acmerobotics.dashboard:dashboard:0.5.0"
-
-    implementation("com.acmerobotics.roadrunner:ftc:0.1.25") {
-        exclude group: 'com.acmerobotics.dashboard'
-    }
 
     implementation 'com.pedropathing:ftc:2.1.2'
     implementation 'com.pedropathing:telemetry:1.0.0'
@@ -119,5 +116,4 @@ dependencies {
     // transitively (slothboard's own POM declares it), so versions stay in
     // sync as long as slothboard's pinned slothRef matches the one above.
     implementation "com.github.6165-MSET-Cuttlefish.slothboard:dashboard:${slothboardRef}"
-    implementation 'androidx.xr.runtime:runtime:1.0.0-alpha14'
 }

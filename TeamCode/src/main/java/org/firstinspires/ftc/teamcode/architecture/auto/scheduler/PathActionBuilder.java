@@ -14,10 +14,9 @@ import java.util.concurrent.Callable;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
-import org.firstinspires.ftc.teamcode.core.action.Action;
-import org.firstinspires.ftc.teamcode.core.Module;
-import org.firstinspires.ftc.teamcode.core.Robot;
-import org.firstinspires.ftc.teamcode.core.State;
+import org.firstinspires.ftc.teamcode.architecture.action.Action;
+import org.firstinspires.ftc.teamcode.architecture.core.Module;
+import org.firstinspires.ftc.teamcode.architecture.core.State;
 
 /**
  * Builds an autonomous sequence of paths, actions, and waits. Queued setState/run/actionDuring
@@ -39,20 +38,20 @@ public class PathActionBuilder {
     private Runnable overrideHandler = null;
 
     private final Follower follower;
-    private final LongSupplier clock;
+    private final LongSupplier gameClockMs;
 
-    public PathActionBuilder() {
-        this(null, null);
-    }
-
-    public PathActionBuilder(Follower follower, LongSupplier clock) {
-        // null follower → late-bind to Robot.robot.follower at use time.
-        this.follower = follower;
-        this.clock = clock;
+    /**
+     * @param follower    the Pedro follower this sequence drives (required)
+     * @param gameClockMs match-elapsed time in ms, used by {@link #setTimeOverride}; typically
+     *                    {@code () -> (long) opMode.getGameTimer().milliseconds()}
+     */
+    public PathActionBuilder(Follower follower, LongSupplier gameClockMs) {
+        this.follower = Objects.requireNonNull(follower, "follower");
+        this.gameClockMs = Objects.requireNonNull(gameClockMs, "gameClockMs");
     }
 
     private Follower follower() {
-        return follower != null ? follower : Robot.robot.follower;
+        return follower;
     }
 
     public PathActionBuilder setStartPose(Pose startPose) {
@@ -93,7 +92,9 @@ public class PathActionBuilder {
                 .moduleStates(drainQueuedStates())
                 .enabled(enabled)
                 .build());
-        nextSegmentStartPose = targetPose;
+        // Only advance the expected start pose if this segment will actually run; a disabled
+        // driveTo drives nowhere, so leaving nextSegmentStartPose put keeps the chain coherent.
+        if (enabled) nextSegmentStartPose = targetPose;
         return this;
     }
 
@@ -117,11 +118,13 @@ public class PathActionBuilder {
         Pose safeStart = Objects.requireNonNull(
                 startPose, "startPose is required; call setStartPose() before buildPath");
 
-        // After a disabled segment, transit back if our expected start drifted.
-        if (enabled && lastSegmentDisabled
-                && nextSegmentStartPose != null
-                && !posesApproxEqual(safeStart, nextSegmentStartPose)) {
-            driveTo(safeStart);
+        // After a disabled segment, transit back if our expected start drifted. Clear the flag
+        // whether or not a transit was inserted, so a stale "disabled" can't fire a spurious
+        // transit many segments later.
+        if (enabled && lastSegmentDisabled) {
+            if (nextSegmentStartPose != null && !posesApproxEqual(safeStart, nextSegmentStartPose)) {
+                driveTo(safeStart);
+            }
             lastSegmentDisabled = false;
         }
 
@@ -146,7 +149,8 @@ public class PathActionBuilder {
         Supplier<PathActionSegment.Resolved> resolver = () -> {
             TrackingPathBuilder pb = new TrackingPathBuilder(follower().getPose(), follower().pathBuilder());
             body.accept(pb);
-            return new PathActionSegment.Resolved(pb.buildPath(), pb.getDuringActions(), pb.isHoldEnd());
+            return new PathActionSegment.Resolved(
+                    pb.buildPath(), pb.getDuringActions(), pb.isHoldEnd(), pb.getHoldAtDistance());
         };
 
         segments.add(new PathActionSegment.Builder()
@@ -212,7 +216,7 @@ public class PathActionBuilder {
     }
 
     public PathActionBuilder setTimeOverride(int timeMs, Runnable handler) {
-        return setOverride(() -> Robot.robot.opMode.getGameTimer().milliseconds() >= timeMs, handler);
+        return setOverride(() -> gameClockMs.getAsLong() >= timeMs, handler);
     }
 
     @CheckResult
@@ -228,7 +232,7 @@ public class PathActionBuilder {
                     .enabled(true)
                     .build());
         }
-        PathActionScheduler scheduler = new PathActionScheduler(follower, clock);
+        PathActionScheduler scheduler = new PathActionScheduler(follower);
         for (int i = 0; i < segments.size(); i++) scheduler.addSegment(segments.get(i));
         if (overrideCondition != null) scheduler.setOverride(overrideCondition, overrideHandler);
         return scheduler;

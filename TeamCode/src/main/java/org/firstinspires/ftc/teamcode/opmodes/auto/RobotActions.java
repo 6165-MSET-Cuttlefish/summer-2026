@@ -1,7 +1,7 @@
 package org.firstinspires.ftc.teamcode.opmodes.auto;
 
-import org.firstinspires.ftc.teamcode.core.action.Action;
-import org.firstinspires.ftc.teamcode.core.action.Actions;
+import org.firstinspires.ftc.teamcode.architecture.action.Action;
+import org.firstinspires.ftc.teamcode.architecture.action.Actions;
 
 import org.firstinspires.ftc.teamcode.opmodes.auto.CloseRobot.Magazine;
 
@@ -29,6 +29,10 @@ public class RobotActions {
      */
     public Action shootAll(boolean resetAfterShoot, boolean firstBallDelay) {
         return Actions.builder()
+                // Block the between-cycle await(shotSorted) until this shot completes. Without this,
+                // shotSorted stays true (only shootSorted() ever cleared it) so the next segment
+                // races the in-flight shot in the default (non-sorting) path.
+                .run(() -> robot.magazine.shotSorted = false)
                 .set(Magazine.IntakeState.OFF, Magazine.VerticalState.ON)
                 .set(Magazine.HorizontalBackState.OPEN_SHOOT)
                 .delay(100)
@@ -40,6 +44,7 @@ public class RobotActions {
                                 Magazine.VerticalState.HALF_DOWN,
                                 Magazine.HorizontalBackState.OPEN)
                         .build())
+                .run(() -> robot.magazine.shotSorted = true)
                 .withName("shootAll")
                 .build();
     }

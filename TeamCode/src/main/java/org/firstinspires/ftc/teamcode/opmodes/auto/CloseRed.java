@@ -2,7 +2,7 @@ package org.firstinspires.ftc.teamcode.opmodes.auto;
 
 import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
 
-import org.firstinspires.ftc.teamcode.core.AllianceColor;
+import org.firstinspires.ftc.teamcode.architecture.core.AllianceColor;
 
 /**
  * RED entry point for the ported "Close" auto. DECODE split alliance into separate ContextRed /

@@ -8,11 +8,11 @@ import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
 import org.firstinspires.ftc.teamcode.architecture.auto.FieldPose;
 import org.firstinspires.ftc.teamcode.architecture.auto.scheduler.PathActionBuilder;
 import org.firstinspires.ftc.teamcode.architecture.auto.scheduler.SchedulerState;
-import org.firstinspires.ftc.teamcode.core.AllianceColor;
-import org.firstinspires.ftc.teamcode.core.Context;
-import org.firstinspires.ftc.teamcode.core.EnhancedOpMode;
-import org.firstinspires.ftc.teamcode.core.Robot;
-import org.firstinspires.ftc.teamcode.core.action.Actions;
+import org.firstinspires.ftc.teamcode.architecture.core.AllianceColor;
+import org.firstinspires.ftc.teamcode.architecture.core.Context;
+import org.firstinspires.ftc.teamcode.architecture.core.EnhancedOpMode;
+import org.firstinspires.ftc.teamcode.architecture.core.Robot;
+import org.firstinspires.ftc.teamcode.architecture.action.Actions;
 
 /**
  * DECODE "Close" autonomous, ported to the summer-2026 framework against hardware-free STUB
@@ -37,28 +37,28 @@ import org.firstinspires.ftc.teamcode.core.action.Actions;
  * {@code CloseBlue} to pick a side, mirroring DECODE's ContextRed/ContextBlue selector opmodes.
  */
 @Autonomous(name = "Close", group = "A")
-@Config
 public class Close extends EnhancedOpMode {
 
-    public static boolean sorting = false;
-    public static boolean runSecondRow = true;
-    public static boolean runGateIntake = true;
-    public static boolean runFirstRow = true;
-
-    public static boolean partnerShooting = true;
+    /** Dashboard-tunable autonomous toggles (nested @Config, matching the MockAuto convention). */
+    @Config
+    public static class Tuning {
+        public static boolean sorting = false;
+        public static boolean runSecondRow = true;
+        public static boolean runGateIntake = true;
+        public static boolean runFirstRow = true;
+        public static boolean partnerShooting = true;
+        public static double shootPreDistanceCycles = 14; // used to be 20, going for consistency
+        public static double REDrpmCycleOffset = -30;
+        public static double BLUErpmCycleOffset = -100;
+        /** Safety cutoff: abort the scheduler if the 30s auto window is blown (DECODE had none explicit). */
+        public static int safetyTimeoutMs = 30000;
+    }
 
     private int intakeDelay = 2000;
     private final int shootDelay = 600;
-    public static double shootPreDistanceCycles = 14; // used to be 20, going for consistency
 
     private final double offsetStartPoseX = 0;
     private final double offsetStartPoseY = 0;
-
-    public static double REDrpmCycleOffset = -30;
-    public static double BLUErpmCycleOffset = -100;
-
-    /** Safety cutoff: abort the scheduler if the 30s auto window is blown (DECODE had none explicit). */
-    public static int safetyTimeoutMs = 30000;
 
     private CloseRobot robot;
     private String phase = "init";
@@ -127,7 +127,7 @@ public class Close extends EnhancedOpMode {
     }
 
     protected Pose getStartPose() {
-        return sorting ? sortStartPose : startPose;
+        return Tuning.sorting ? sortStartPose : startPose;
     }
 
     @Override
@@ -140,24 +140,27 @@ public class Close extends EnhancedOpMode {
     }
 
     private void buildAutonomousSequence() {
-        PathActionBuilder builder = new PathActionBuilder();
+        PathActionBuilder builder = new PathActionBuilder(
+                robot.follower, () -> (long) getGameTimer().milliseconds());
         builder.setStartPose(robot.follower.getPose());
 
-        addPreloadSecondRow(builder, runSecondRow);
-        addGateIntake(builder, false, runGateIntake);
-        if (sorting) {
+        addPreloadSecondRow(builder, Tuning.runSecondRow);
+        addGateIntake(builder, false, Tuning.runGateIntake);
+        if (Tuning.sorting) {
             addThirdRow(builder);
         } else {
-            addGateIntake(builder, false, runGateIntake);
-            addGateIntake(builder, true, runGateIntake);
-            if (partnerShooting) {
-                addGateIntake(builder, true, runGateIntake);
+            addGateIntake(builder, false, Tuning.runGateIntake);
+            addGateIntake(builder, true, Tuning.runGateIntake);
+            if (Tuning.partnerShooting) {
+                // Shorten the intake dwell for the extra partner cycle. This was a dead store set
+                // AFTER the addGateIntake that should consume it; moved before so it takes effect.
                 intakeDelay = 1000;
+                addGateIntake(builder, true, Tuning.runGateIntake);
             }
         }
-        addFirstRow(builder, runFirstRow);
+        addFirstRow(builder, Tuning.runFirstRow);
 
-        builder.setTimeOverride(safetyTimeoutMs, () -> phase = "SAFETY TIMEOUT — scheduler aborted");
+        builder.setTimeOverride(Tuning.safetyTimeoutMs, () -> phase = "SAFETY TIMEOUT — scheduler aborted");
 
         robot.pathActionScheduler = builder.build();
     }
@@ -176,7 +179,7 @@ public class Close extends EnhancedOpMode {
                 .run(() -> robot.turret.lock(preloadScorePose))
                 .run(() ->
                         Actions.builder()
-                                .delay(sorting ? 150 : 0) // needs tuning for sorting
+                                .delay(Tuning.sorting ? 150 : 0) // needs tuning for sorting
                                 .set(CloseRobot.Shooter.FlywheelState.CLOSE_AUTO_PRELOAD)
                                 .waitUntil(() -> robot.shooter.getCurrentVelocityRPM() > 1000)
                                 .run(() -> robot.actions.shootAll(true, false).schedule())
@@ -186,7 +189,7 @@ public class Close extends EnhancedOpMode {
                         ? new Pose(CloseRobot.redTargetPose.getX() + 18, CloseRobot.redTargetPose.getY())
                         : new Pose(CloseRobot.blueTargetPose.getX() - 17, CloseRobot.blueTargetPose.getY()))
                 .run(() -> {
-                    robot.shooter.closeVelocityOffset = Context.allianceColor == AllianceColor.BLUE ? BLUErpmCycleOffset : REDrpmCycleOffset;
+                    robot.shooter.closeVelocityOffset = Context.allianceColor == AllianceColor.BLUE ? Tuning.BLUErpmCycleOffset : Tuning.REDrpmCycleOffset;
                     robot.shooter.lockFlywheel(score2RowPose);
                     robot.shooter.lockHood(score2RowPose);
                 })
@@ -199,7 +202,7 @@ public class Close extends EnhancedOpMode {
                     }
                     // DECODE used a constant/linear/constant heading splice that nets to a
                     // preloadScore.heading -> intake2.heading sweep; map to the framework's linear heading.
-                    if (sorting) {
+                    if (Tuning.sorting) {
                         path.setLinearHeading(preloadScorePose.getHeading(), intake2Pose.getHeading());
                         path.addParametricCallback(0, () -> robot.actions.detectObeliskLoop().schedule());
                     } else {
@@ -227,9 +230,9 @@ public class Close extends EnhancedOpMode {
                             path.getStartPose().getHeading(), score2RowPose.getHeading(), 0.01);
                     path.setConstraints(new PathConstraints(0.9, 0));
                     path.addCallback(() -> robot.follower.getDistanceRemaining() <= 15, () -> {
-                        if (sorting) robot.actions.sortMagazine().schedule();
+                        if (Tuning.sorting) robot.actions.sortMagazine().schedule();
                     });
-                    path.addCallback(() -> robot.follower.getDistanceRemaining() <= shootPreDistanceCycles,
+                    path.addCallback(() -> robot.follower.getDistanceRemaining() <= Tuning.shootPreDistanceCycles,
                             () -> robot.actions.shootAll(true, false).schedule());
                     path.holdAtDistance(15);
                 }, 3000)
@@ -249,7 +252,7 @@ public class Close extends EnhancedOpMode {
                             : new Pose(CloseRobot.blueTargetPose.getX() - 17, CloseRobot.blueTargetPose.getY());
                 })
                 .run(() -> {
-                    robot.shooter.closeVelocityOffset = Context.allianceColor == AllianceColor.BLUE ? BLUErpmCycleOffset : REDrpmCycleOffset;
+                    robot.shooter.closeVelocityOffset = Context.allianceColor == AllianceColor.BLUE ? Tuning.BLUErpmCycleOffset : Tuning.REDrpmCycleOffset;
                     robot.shooter.lockFlywheel(gateScorePose);
                     robot.shooter.lockHood(gateScorePose);
                 })
@@ -279,10 +282,10 @@ public class Close extends EnhancedOpMode {
                             path.getStartPose().getHeading(), gateScorePose.getHeading(), 0.01);
                     path.setConstraints(new PathConstraints(0.9, 0));
                     path.addTemporalCallback(400, () -> {
-                        if (sorting) robot.actions.sortMagazine().schedule();
+                        if (Tuning.sorting) robot.actions.sortMagazine().schedule();
                     });
-                    path.addCallback(() -> robot.follower.getDistanceRemaining() <= shootPreDistanceCycles, () -> {
-                        if (sorting) {
+                    path.addCallback(() -> robot.follower.getDistanceRemaining() <= Tuning.shootPreDistanceCycles, () -> {
+                        if (Tuning.sorting) {
                             robot.actions.shootSorted(true).schedule();
                         } else {
                             robot.actions.shootAll(true, false).schedule();
@@ -295,6 +298,10 @@ public class Close extends EnhancedOpMode {
     }
 
     private void addThirdRow(PathActionBuilder builder) {
+        // The third row is the sorting cycle (already gated by the sorting branch). Enable it
+        // explicitly so a preceding addGateIntake(..., enabled=false) can't silently disable it via
+        // the builder's sticky enabled flag.
+        builder.setEnabled(true);
         builder.setState(CloseRobot.Magazine.IntakeState.FORWARD,
                         CloseRobot.Shooter.FlywheelState.CLOSE_AUTO, CloseRobot.Shooter.HoodState.CLOSE_AUTO)
                 .run(() -> robot.turret.lock(score3RowPose))
@@ -350,12 +357,12 @@ public class Close extends EnhancedOpMode {
                             path.getStartPose().getHeading(), scoreParkPose.getHeading(), 0.1);
                     path.setConstraints(new PathConstraints(0.95, 0));
                     path.addTemporalCallback(400, () -> {
-                        if (sorting) robot.actions.sortMagazine().schedule();
+                        if (Tuning.sorting) robot.actions.sortMagazine().schedule();
                     });
                     path.addCallback(() -> robot.follower.getDistanceRemaining() <= 35,
-                            () -> { if (!sorting) robot.actions.shootAll(true, false).schedule(); });
+                            () -> { if (!Tuning.sorting) robot.actions.shootAll(true, false).schedule(); });
                     path.addCallback(() -> robot.follower.getDistanceRemaining() <= 20,
-                            () -> { if (sorting) robot.actions.shootSorted(true).schedule(); });
+                            () -> { if (Tuning.sorting) robot.actions.shootSorted(true).schedule(); });
                     path.holdAtDistance(1);
                 }, 100000)
                 .await(() -> robot.magazine.shotSorted);
@@ -382,10 +389,12 @@ public class Close extends EnhancedOpMode {
             telemetry.addData("Scheduler", robot.pathActionScheduler.getDebugInfo());
             telemetry.addData("Complete", robot.pathActionScheduler.isComplete());
         }
-        Pose start = getStartPose();
-        if (start != null) {
+        // Compare against the pose the follower was actually seeded to (setup pose), not the
+        // intended start pose — otherwise this misreports drift from the first loop.
+        Pose seededFrom = getSetupPose();
+        if (seededFrom != null) {
             Pose cur = robot.follower.getPose();
-            double dist = Math.hypot(cur.getX() - start.getX(), cur.getY() - start.getY());
+            double dist = Math.hypot(cur.getX() - seededFrom.getX(), cur.getY() - seededFrom.getY());
             telemetry.addData("Start offset (in)", String.format("%.1f", dist));
         }
     }

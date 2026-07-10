@@ -54,6 +54,11 @@ public class EnhancedServo implements Servo, PwmControl {
     }
 
     public double getCachingTolerance() { return cache.tolerance; }
+    /**
+     * Raw device for reads or SDK calls this wrapper doesn't proxy. Writing position directly
+     * through it bypasses the write cache and leaves it stale — prefer {@link #setPosition(double)},
+     * or {@link #setPositionRaw(double)} which keeps the cache in sync.
+     */
     public ServoImplEx getUnderlying() { return servo; }
     public double getCachedPosition() { return cache.cached; }
 
@@ -61,7 +66,11 @@ public class EnhancedServo implements Servo, PwmControl {
     @Override public int getPortNumber() { return servo.getPortNumber(); }
 
     @Override public Direction getDirection() { return servo.getDirection(); }
-    @Override public void setDirection(Direction direction) { servo.setDirection(direction); }
+    @Override public void setDirection(Direction direction) {
+        servo.setDirection(direction);
+        // Direction remaps the commanded position; drop the cache so the next setPosition writes.
+        cache.store(Double.NaN);
+    }
 
     @Override public void scaleRange(double min, double max) { servo.scaleRange(min, max); }
 
