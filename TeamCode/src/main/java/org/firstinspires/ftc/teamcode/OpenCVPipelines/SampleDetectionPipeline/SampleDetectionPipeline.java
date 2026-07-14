@@ -203,8 +203,10 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
     // -------------------------------------------------------------------------
     private enum Phase { CALIBRATING, DETECTING }
 
-    private Phase phase;
-    private Mat   homography   = null;
+    // volatile: written on the camera thread (processFrame), read on the OpMode thread (getHomography /
+    // isCalibrated / getHomographyAsString).
+    private volatile Phase phase;
+    private volatile Mat   homography   = null;
     private int   confirmCount = 0;
     private int   frameCount   = 0;
 
@@ -217,6 +219,8 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
     private final Mat holeFilled   = new Mat();
     private final Mat distMat      = new Mat();
     private final Mat displayImage = new Mat();
+    // Reused findContours hierarchy output — was a per-seed `new Mat()` that leaked every frame.
+    private final Mat contourHierarchy = new Mat();
 
     private final MatOfPoint2f dstCorners;
 
@@ -308,13 +312,17 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
         Mat h = computeHomography(imageCorners, dstCorners);
 
         if (h == null) {
+            imageCorners.release();
             confirmCount = 0;
             telemetry.addLine("[Calibrating] Homography computation failed");
             telemetry.update();
             return input;
         }
 
+        // Release the homography we're superseding so calibration frames don't leak one each.
+        Mat previousHomography = homography;
         homography = h;
+        if (previousHomography != null && previousHomography != h) previousHomography.release();
         confirmCount++;
 
         if (confirmCount >= FRAMES_TO_CONFIRM) {
@@ -329,6 +337,7 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
         telemetry.update();
 
         Calib3d.drawChessboardCorners(input, new Size(GRID_COLS, GRID_ROWS), imageCorners, true);
+        imageCorners.release();
         return input;
     }
 
@@ -457,79 +466,94 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
                     if (roiW <= 0 || roiH <= 0) continue;
                     Rect roi = new Rect(roiX, roiY, roiW, roiH);
 
+                    // Per-seed native Mats. This loop runs once per candidate ball on every processed
+                    // frame, so anything not released here accumulates on the Control Hub's native
+                    // heap and crashes the process within a match — release them all in finally so no
+                    // early-out (`continue`) can leak. (offsetContour is kept in the BallResult for
+                    // the later draw pass and released after that; see below.)
                     Mat markersRoi = freshMarkers.submat(roi);
                     Mat regionMask = new Mat();
-                    Core.compare(markersRoi, new Scalar(label), regionMask, Core.CMP_EQ);
-                    regionMask.convertTo(regionMask, CvType.CV_8U, 255);
-
                     List<MatOfPoint> regionContours = new ArrayList<>();
-                    Imgproc.findContours(regionMask, regionContours, new Mat(),
-                            Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
+                    MatOfPoint2f contour2f = null;
+                    Mat distRoi = null;
+                    Mat regionDist = null;
+                    try {
+                        Core.compare(markersRoi, new Scalar(label), regionMask, Core.CMP_EQ);
+                        regionMask.convertTo(regionMask, CvType.CV_8U, 255);
 
-                    if (regionContours.isEmpty()) { regionMask.release(); continue; }
+                        Imgproc.findContours(regionMask, regionContours, contourHierarchy,
+                                Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
 
-                    MatOfPoint contour = regionContours.get(0);
-                    double area = Imgproc.contourArea(contour);
-                    for (MatOfPoint c : regionContours) {
-                        double a = Imgproc.contourArea(c);
-                        if (a > area) { area = a; contour = c; }
-                    }
+                        if (regionContours.isEmpty()) continue;
 
-                    if (area < minArea || area > maxArea) { regionMask.release(); continue; }
-
-                    MatOfPoint2f contour2f = new MatOfPoint2f(contour.toArray());
-                    double perimeter = Imgproc.arcLength(contour2f, true);
-                    double circularity = perimeter > 0
-                            ? (4 * Math.PI * area) / (perimeter * perimeter)
-                            : 0;
-                    if (circularity < MIN_CIRCULARITY) { regionMask.release(); continue; }
-
-                    // Distance-transform peak, also restricted to the same ROI
-                    Mat distRoi = distMat.submat(roi);
-                    Mat regionDist = new Mat(distRoi.size(), distRoi.type(), Scalar.all(0));
-                    distRoi.copyTo(regionDist, regionMask);
-                    double peak = Core.minMaxLoc(regionDist).maxVal;
-                    regionDist.release();
-                    regionMask.release();
-
-                    double impliedRadius = Math.sqrt(area / Math.PI);
-                    double roundness = impliedRadius > 0 ? peak / impliedRadius : 0;
-                    if (roundness < MIN_ROUNDNESS_RATIO) continue;
-
-                    BallResult result = new BallResult();
-
-                    // The contour was found within a cropped ROI submat, so its
-                    // point coordinates are ROI-local. Offset every point by the
-                    // ROI's top-left corner to get back to full-small-image
-                    // coordinates before storing/using them anywhere downstream.
-                    Point[] roiLocalPts = contour.toArray();
-                    Point[] offsetPts = new Point[roiLocalPts.length];
-                    for (int i = 0; i < roiLocalPts.length; i++) {
-                        offsetPts[i] = new Point(roiLocalPts[i].x + roi.x, roiLocalPts[i].y + roi.y);
-                    }
-                    MatOfPoint offsetContour = new MatOfPoint(offsetPts);
-                    result.contourSmall = offsetContour;
-
-                    org.opencv.imgproc.Moments m = Imgproc.moments(offsetContour);
-                    result.centerSmall = new Point(
-                            m.m00 != 0 ? m.m10 / m.m00 : seed[0],
-                            m.m00 != 0 ? m.m01 / m.m00 : seed[1]);
-
-                    double contactX = offsetPts[0].x;
-                    double contactY = offsetPts[0].y;
-                    for (Point p : offsetPts) {
-                        if (p.y > contactY) {
-                            contactY = p.y;
-                            contactX = p.x;
+                        MatOfPoint contour = regionContours.get(0);
+                        double area = Imgproc.contourArea(contour);
+                        for (MatOfPoint c : regionContours) {
+                            double a = Imgproc.contourArea(c);
+                            if (a > area) { area = a; contour = c; }
                         }
+
+                        if (area < minArea || area > maxArea) continue;
+
+                        contour2f = new MatOfPoint2f(contour.toArray());
+                        double perimeter = Imgproc.arcLength(contour2f, true);
+                        double circularity = perimeter > 0
+                                ? (4 * Math.PI * area) / (perimeter * perimeter)
+                                : 0;
+                        if (circularity < MIN_CIRCULARITY) continue;
+
+                        // Distance-transform peak, also restricted to the same ROI
+                        distRoi = distMat.submat(roi);
+                        regionDist = new Mat(distRoi.size(), distRoi.type(), Scalar.all(0));
+                        distRoi.copyTo(regionDist, regionMask);
+                        double peak = Core.minMaxLoc(regionDist).maxVal;
+
+                        double impliedRadius = Math.sqrt(area / Math.PI);
+                        double roundness = impliedRadius > 0 ? peak / impliedRadius : 0;
+                        if (roundness < MIN_ROUNDNESS_RATIO) continue;
+
+                        BallResult result = new BallResult();
+
+                        // The contour was found within a cropped ROI submat, so its
+                        // point coordinates are ROI-local. Offset every point by the
+                        // ROI's top-left corner to get back to full-small-image
+                        // coordinates before storing/using them anywhere downstream.
+                        Point[] roiLocalPts = contour.toArray();
+                        Point[] offsetPts = new Point[roiLocalPts.length];
+                        for (int i = 0; i < roiLocalPts.length; i++) {
+                            offsetPts[i] = new Point(roiLocalPts[i].x + roi.x, roiLocalPts[i].y + roi.y);
+                        }
+                        MatOfPoint offsetContour = new MatOfPoint(offsetPts);
+                        result.contourSmall = offsetContour;
+
+                        org.opencv.imgproc.Moments m = Imgproc.moments(offsetContour);
+                        result.centerSmall = new Point(
+                                m.m00 != 0 ? m.m10 / m.m00 : seed[0],
+                                m.m00 != 0 ? m.m01 / m.m00 : seed[1]);
+
+                        double contactX = offsetPts[0].x;
+                        double contactY = offsetPts[0].y;
+                        for (Point p : offsetPts) {
+                            if (p.y > contactY) {
+                                contactY = p.y;
+                                contactX = p.x;
+                            }
+                        }
+                        result.contactSmall = new Point(contactX, contactY);
+
+                        double fullResX = contactX / DETECTION_SCALE;
+                        double fullResY = contactY / DETECTION_SCALE;
+                        result.fieldPoint = transformPointToField(fullResX, fullResY);
+
+                        results.add(result);
+                    } finally {
+                        markersRoi.release();
+                        regionMask.release();
+                        if (contour2f != null) contour2f.release();
+                        if (distRoi != null) distRoi.release();
+                        if (regionDist != null) regionDist.release();
+                        for (MatOfPoint c : regionContours) c.release();
                     }
-                    result.contactSmall = new Point(contactX, contactY);
-
-                    double fullResX = contactX / DETECTION_SCALE;
-                    double fullResY = contactY / DETECTION_SCALE;
-                    result.fieldPoint = transformPointToField(fullResX, fullResY);
-
-                    results.add(result);
                 }
 
                 freshMarkers.release();
@@ -556,6 +580,12 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
             for (BallResult r : results) {
                 drawBallOverlay(displayImage, r);
             }
+        }
+
+        // Free the per-ball contour Mats now drawing is done (kept out of the per-seed finally
+        // specifically so this draw pass could use them).
+        for (int i = 0; i < results.size(); i++) {
+            if (results.get(i).contourSmall != null) results.get(i).contourSmall.release();
         }
 
         drawOriginCrosshair(displayImage);
@@ -585,6 +615,7 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
         List<MatOfPoint> singleContourList = new ArrayList<>();
         singleContourList.add(fullContour);
         Imgproc.drawContours(displayImage, singleContourList, -1, new Scalar(0, 255, 0), 2);
+        fullContour.release();
 
         Point centerFull  = new Point(r.centerSmall.x  * scaleUp, r.centerSmall.y  * scaleUp);
         Point contactFull = new Point(r.contactSmall.x * scaleUp, r.contactSmall.y * scaleUp);
@@ -614,7 +645,9 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
         for (int i = 0; i < smallPts.length; i++) {
             fullPts[i] = new Point(smallPts[i].x * scaleUp, smallPts[i].y * scaleUp);
         }
-        Rect box = Imgproc.boundingRect(new MatOfPoint(fullPts));
+        MatOfPoint boxContour = new MatOfPoint(fullPts);
+        Rect box = Imgproc.boundingRect(boxContour);
+        boxContour.release();
 
         Scalar boxColor  = new Scalar(0, 255, 0);   // green
         Scalar textColor = new Scalar(255, 255, 255); // white

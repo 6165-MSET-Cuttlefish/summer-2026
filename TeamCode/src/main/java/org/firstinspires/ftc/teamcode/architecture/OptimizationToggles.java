@@ -36,4 +36,12 @@ public final class OptimizationToggles {
 
     /** Lynx current-read cadence; one I2C round-trip per hub when fired. */
     public static int currentReadEveryNLoops = 1;
+
+    /** Drivetrain current-limiter: compute the floodgate multiplier every N loops instead of every setTargets. */
+    public static boolean optimizeCurrentLimiterComputation = false;
+    public static int optimizeCurrentLimiterEveryNLoops = 2;
+    public static boolean optimizeCurrentLimiterTelemetry = false;
+
+    /** Drivetrain.getMotorPowers() returns a cached double[4] instead of allocating each call. */
+    public static boolean optimizeMotorPowersCaching = true;
 }

@@ -1,5 +1,7 @@
 package org.firstinspires.ftc.teamcode.architecture.input;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.BooleanSupplier;
 import java.util.function.DoubleSupplier;
 import java.util.function.Function;
@@ -10,7 +12,15 @@ import java.util.function.Function;
  */
 public class LayeredGamepad<T> {
     private final LayerStack<T> layerStack;
-    private boolean suppressInputsUntilNextInvalidate = false;
+    // Suppress facade input only through the InputClock frame of a layer switch; auto-expires when
+    // the clock advances next loop. (Was a boolean cleared only by invalidateAll(), which froze ALL
+    // facade input for the match if a team polled suppliers directly and never pumped invalidateAll.)
+    private long suppressUntilFrame = Long.MIN_VALUE;
+    // Externally-derived suppliers (from .greaterThan()/.and()/etc.) registered via track()/
+    // trackDouble() so they are primed on a layer switch alongside the built-in facade suppliers —
+    // without this a derived supplier fires a spurious edge on the first layer change.
+    private final List<EdgeBooleanSupplier> trackedBools = new ArrayList<>();
+    private final List<CachedDoubleSupplier> trackedDoubles = new ArrayList<>();
 
     private final CachedDoubleSupplier leftStickX, leftStickY;
     private final CachedDoubleSupplier rightStickX, rightStickY;
@@ -80,7 +90,7 @@ public class LayeredGamepad<T> {
     public LayerStack<T> getLayerStack() { return layerStack; }
 
     public LayerGamepad getActiveGamepad() {
-        if (suppressInputsUntilNextInvalidate) return null;
+        if (InputClock.current() < suppressUntilFrame) return null;
         return layerStack.getGamepad();
     }
 
@@ -94,10 +104,12 @@ public class LayeredGamepad<T> {
     }
 
     private void onLayerChanged() {
-        // Push atRest physically before priming so suppliers see the new layer state.
+        // Push atRest physically before priming so suppliers see the new layer state. Prime BEFORE
+        // arming suppression so priming reads the real new-layer state (getActiveGamepad isn't
+        // suppressed yet). Suppression then covers only this frame and auto-expires next loop.
         layerStack.invalidateAll();
         primeAllSuppliers();
-        suppressInputsUntilNextInvalidate = true;
+        suppressUntilFrame = InputClock.current() + 1;
     }
 
     public boolean isActive(LayerGamepad gamepad) {
@@ -108,30 +120,37 @@ public class LayeredGamepad<T> {
         layerStack.update();
     }
 
-    /** Call once per loop. After a layer switch, suppliers are primed and inputs resume next frame. */
+    /**
+     * Call once per loop to refresh inputs eagerly. Optional now: suppliers also refresh lazily off
+     * {@link InputClock} when queried, and a layer switch primes them + auto-expires suppression the
+     * same frame — so skipping this no longer freezes input (it just makes edges lazy-evaluated).
+     */
     public void invalidateAll() {
         // Refresh underlying gamepads first so wrappers don't stay one frame behind.
         layerStack.invalidateAll();
-
-        if (suppressInputsUntilNextInvalidate) {
-            suppressInputsUntilNextInvalidate = false;
-            primeAllSuppliers();
-            return;
-        }
-
         forEachSupplier(EdgeBooleanSupplier::invalidate, CachedDoubleSupplier::invalidate);
     }
 
     public void invalidateActive() {
         layerStack.invalidateActive();
-
-        if (suppressInputsUntilNextInvalidate) {
-            suppressInputsUntilNextInvalidate = false;
-            primeAllSuppliers();
-            return;
-        }
-
         forEachSupplier(EdgeBooleanSupplier::invalidate, CachedDoubleSupplier::invalidate);
+    }
+
+    /**
+     * Register externally-derived suppliers (e.g. {@code gamepad.LT().greaterThan(0.5)} or
+     * {@code gamepad.RB().and(...)}) so they are primed on a layer switch and refreshed by
+     * {@link #invalidateAll()} alongside the built-in facade suppliers. Without this, a derived
+     * supplier is never primed and fires a spurious edge on the first layer change.
+     */
+    public LayeredGamepad<T> track(EdgeBooleanSupplier... suppliers) {
+        for (EdgeBooleanSupplier s : suppliers) if (s != null) trackedBools.add(s);
+        return this;
+    }
+
+    /** Double-valued counterpart to {@link #track(EdgeBooleanSupplier...)}. */
+    public LayeredGamepad<T> trackDouble(CachedDoubleSupplier... suppliers) {
+        for (CachedDoubleSupplier s : suppliers) if (s != null) trackedDoubles.add(s);
+        return this;
     }
 
     private void primeAllSuppliers() {
@@ -152,6 +171,10 @@ public class LayeredGamepad<T> {
         dbl.accept(rightStickX); dbl.accept(rightStickY);
         dbl.accept(leftTrigger); dbl.accept(rightTrigger);
         dbl.accept(touchpadFinger1X); dbl.accept(touchpadFinger1Y);
+
+        // Registered derived suppliers get the same prime/invalidate treatment as the facade.
+        for (int i = 0; i < trackedBools.size(); i++) bool.accept(trackedBools.get(i));
+        for (int i = 0; i < trackedDoubles.size(); i++) dbl.accept(trackedDoubles.get(i));
     }
 
     public CachedDoubleSupplier getLeftStickX()  { return leftStickX; }

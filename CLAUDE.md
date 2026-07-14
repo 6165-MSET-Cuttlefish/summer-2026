@@ -37,7 +37,7 @@ There is no test suite in this repo — it's a robot controller APK, not a libra
 
 **Build JDK: Java 17.** The Gradle daemon is pinned to Java 17 via `gradle/gradle-daemon-jvm.properties` (`toolchainVersion=17`) — AGP 8.7's required JDK. Building on a newer JDK (e.g. 25) only produced deprecation warnings, but JDK 17 is the supported baseline, so a JDK 17 install must be discoverable (Gradle 8.9 can't auto-download one — that landed in 8.10). The `./gradlew` launcher JVM is separate and can be anything on `PATH`; only the daemon JVM (which runs AGP/javac/dex) is pinned. Don't bump this without checking AGP/Gradle JDK compatibility.
 
-The codebase is pure Java; no Kotlin plugin, no Kotlin sources. If reintroducing Kotlin, also re-add `apply plugin: 'kotlin-android'` to `TeamCode/build.gradle`, the `kotlin_version` ext + `kotlin-gradle-plugin` classpath in the root `build.gradle`, and a `kotlinOptions { jvmTarget '1.8' }` block to keep Java/Kotlin targets aligned.
+The framework and OpModes are pure Java, but **Kotlin is wired in** for the `purepursuit/` experiment tree (its `*.kt` sources). The root `build.gradle` pins `ext.kotlin_version = '2.4.0'` as the single source of truth for the `kotlin-gradle-plugin` classpath; `TeamCode/build.gradle` applies `org.jetbrains.kotlin.android` with `kotlinOptions { jvmTarget '1.8' }`; `androidx.core:core-ktx` is on the classpath. Kotlin 2.4.0 fully supports the pinned Gradle 8.9 (its supported range is 7.6.3–9.5.0), so no Gradle bump is needed. If the `purepursuit/` tree is removed, dropping the Kotlin plugin + `core-ktx` reverts this to pure Java.
 
 ## Module / Gradle structure
 
@@ -51,26 +51,27 @@ The codebase is pure Java; no Kotlin plugin, no Kotlin sources. If reintroducing
 
 **Dashboard.** Telemetry/control comes via slothboard (`com.github.6165-MSET-Cuttlefish.slothboard:dashboard`), the team's fork of `Dairy-Foundation/ftc-dashboard`. Pinned by `ext.slothboardRef` in the root `build.gradle`. Both Sloth and slothboard pin by commit SHA rather than release tag — it's a single-team chain with no external consumers expecting semver. Slothboard's POM transitively pulls the 6165 Sloth fork, so the chain is `summer-2026 → slothboard → 6165/Sloth`. To bump slothboard, edit `slothboardRef`; don't introduce tags.
 
-**Pedro Pathing.** Path follower comes from `com.pedropathing:ftc:2.1.2` (Maven Central). The team's wrapper layer assumes Pedro 2.x semantics — `Pose` is immutable, `Pose.mirror(fieldWidth)` exists, `FTCCoordinates.INSTANCE` is the field-centered coordinate system, `PoseHistory` is a 30-sample fixed ring. Don't downgrade without checking the wrapper for callers of those.
+**Pedro Pathing.** Path follower comes from `com.pedropathing:ftc:2.1.2` (Maven Central). The team's wrapper layer assumes Pedro 2.x semantics — `Pose` is immutable, `Pose.mirror(fieldWidth)` exists, `FTCCoordinates.INSTANCE` is the field-centered coordinate system, `PoseHistory` is a 30-sample fixed ring, `Follower.getTotalDistanceRemaining()` is the chain-aware remaining distance. Don't downgrade without checking the wrapper for callers of those.
+
+**Roadrunner (purepursuit experiment only).** The `purepursuit/` tree pulls `com.acmerobotics.roadrunner:{ftc:0.1.25,core:1.0.1,actions:1.0.1}` plus `org.ftclib.ftclib:core`, which require the `https://maven.brott.dev/` repo declared in `TeamCode/build.gradle`. FTC Dashboard is excluded from all configurations (`configurations.configureEach { exclude group: 'com.acmerobotics.dashboard' }`) so slothboard is the only dashboard on the classpath. These deps ship in every APK regardless of which OpMode runs — drop them (and the Kotlin plugin) if the pure-pursuit testbed is removed.
 
 ## Framework layout
 
-The team's framework lives under `TeamCode/src/main/java/org/firstinspires/ftc/teamcode/`. Two top-level packages:
+The team's framework lives under `TeamCode/src/main/java/org/firstinspires/ftc/teamcode/`, **entirely within the `architecture/` package**. (The old top-level `core/` package was merged into `architecture/core/` + `architecture/action/`; nothing lives in `core/` anymore.)
 
-- **`core/`** — central abstractions every game uses.
+- **`architecture/core/`** — central abstractions every game uses.
   - `EnhancedOpMode.java` — base OpMode with auto-discovered modules, voltage compensation, dual telemetry, dashboard field rendering, action scheduler pump.
-  - `Robot.java` — game-agnostic robot base. Game subclass instantiates mechanism modules in `initializeGameModules()`.
+  - `Robot.java` — game-agnostic robot base. Game subclass instantiates mechanism modules in `initializeGameModules()`. Builds the Pedro `Follower` (always from the configured start pose — no pose-carry across Sloth reloads).
   - `Module.java` — base for a hardware subsystem. Override `initStates()`, `read()`, `write()`, optional `init()` and `stop()`.
   - `State.java` — state-machine state interface; backing maps live as statics on the interface itself, cleared per-OpMode via `State.clearModuleBindings()`.
   - `AllianceColor.java`, `Context.java` — the only cross-game shared state is alliance side.
-  - `action/` — `Action`, `ActionBuilder`, `Actions` (cooperative single-thread scheduler).
-
-- **`architecture/`** — supporting wrappers and infrastructure.
+- **`architecture/action/`** — `Action`, `ActionBuilder`, `Actions` (cooperative single-thread scheduler).
+- **`architecture/`** — other supporting wrappers and infrastructure.
   - `OptimizationToggles.java` — framework-wide `@Config` toggles for telemetry cadence, profiler enable, etc.
-  - `auto/` — Pedro Pathing setup + path-action scheduler. `PedroSetup` builds the Follower; `RobotHardwareConfig` holds the per-robot hardware names; `scheduler/*` is the autonomous DSL on top of Pedro.
+  - `auto/` — Pedro Pathing setup + path-action scheduler. `PedroSetup` is a **per-robot selector** (`PedroSetup.activeRobot` ∈ `{BETTA, DECODE}`, `@Config`) whose `createFollower(...)` dispatches to `BettaPedroSetup`+`BettaHardwareConfig` or `DecodePedroSetup`+`DecodeHardwareConfig` (tuning + hardware wiring split per robot). DECODE OpModes pin `activeRobot=DECODE` in `DecodeOpMode.createRobot()` before the follower is built. `scheduler/*` is the autonomous DSL on top of Pedro (its builders/scheduler take an injected `Follower` + game-time supplier — there is no `Robot.robot` service locator).
   - `control/` — `PidController` (PID + feed-forward + static-friction kick).
-  - `hardware/` — `EnhancedMotor`, `EnhancedServo`, `EnhancedCRServo`, `WriteCache`, `BatteryVoltage`, `AbsoluteAnalogEncoder`.
-  - `input/` — gamepad layering and edge-detecting suppliers: `LayerStack`, `LayeredGamepad`, `LayerGamepad`, `EdgeBooleanSupplier`, `CachedDoubleSupplier`.
+  - `hardware/` — `EnhancedMotor`, `EnhancedServo`, `EnhancedCRServo`, `WriteCache`, `BatteryVoltage`, `AbsoluteAnalogEncoder`, `LaserRangefinder`.
+  - `input/` — gamepad layering and edge-detecting suppliers: `LayerStack`, `LayeredGamepad`, `LayerGamepad`, `EdgeBooleanSupplier`, `CachedDoubleSupplier`, `InputClock` (per-loop frame counter advanced by `EnhancedOpMode` so edge suppliers refresh exactly once per loop).
   - `prism/` — vendored goBilda Prism RGB LED driver (MIT-licensed Base 10 Assets code; don't refactor, track upstream).
   - `telemetry/` — `DualTelemetry` (fan-out DS + dashboard), `HtmlFormatter`, `FieldMapRenderer` (DS field map), `LoopProfiler` (per-section timing).
   - `testing/` — `HardwareTest` (single-device bench-test OpMode templates).
@@ -112,7 +113,7 @@ optional Thread.sleep       // if minLoopMs forces a floor
 
 `Actions.update()` runs **between** `gameLoop()` and `writeModules()` so action-applied state lands in the same write pass as user code. Don't move it.
 
-`stop()` cancels all actions, cancels the path-action scheduler, calls `module.stop()` on every module (each in a try/catch so one bad module doesn't block the rest), then `onEnd()`.
+`stop()` cancels all actions, cancels the path-action scheduler, calls `module.stop()` on every module then `onEnd()` — this is the framework's safe-state pass, so it is best-effort: each `module.stop()` and `onEnd()` runs even if an earlier one throws (the SDK does not auto-zero motors on stop), and the **first** captured `Throwable` is rethrown after all of them have run, preserving fail-fast visibility without leaving hardware energized because an unrelated module threw first.
 
 ## Module pattern
 
@@ -213,8 +214,8 @@ The scheduler is pumped from your auto's `gameLoop()`:
 There are three layers of "knob," in order of where to look:
 
 1. **Per-mechanism `@Config static class Tuning`** — setpoints, gains, offsets. Pair with `Module.bindTunable(state, () -> Tuning.x)` so dashboard edits land in the next `read()`.
-2. **`PedroSetup`** (`architecture/auto/`) — Pedro `FollowerConstants` / `MecanumConstants` / `PinpointConstants` / `PathConstraints`. Edit when retuning path follow.
-3. **`RobotHardwareConfig`** (`architecture/auto/`) — motor names, motor directions, Pinpoint pod offsets. Fields are `final`; edit only when wiring a new robot.
+2. **`{Betta,Decode}PedroSetup`** (`architecture/auto/`) — per-robot Pedro `FollowerConstants` / `MecanumConstants` / `PinpointConstants` / `PathConstraints`. Edit the robot's file when retuning path follow. `PedroSetup.activeRobot` selects which one `createFollower` uses.
+3. **`{Betta,Decode}HardwareConfig`** (`architecture/auto/`) — per-robot motor names, motor directions, Pinpoint pod offsets. Fields are `final`; edit the robot's file when wiring that robot. (Betta and DECODE differ in the strafe-pod encoder direction.)
 
 Plus framework-wide knobs:
 
@@ -245,7 +246,8 @@ For "test one module in isolation" patterns, write a custom OpMode extending `Op
 - Debug keystore at `libs/ftc.debug.keystore` is the FTC standard one (matches RC firmware installer's expectations); don't replace it.
 - `TeamCode/lib/OpModeAnnotationProcessor.jar` is the FTC annotation processor — leave it where it is.
 - Comments: only when the WHY is non-obvious. No method-name-restating Javadoc, no section-header banners (`// ─── label ──`). Short docs on user-facing public API where the name alone doesn't carry intent are fine.
-- Test/sample OpModes go under `opmodes/test/` (not present yet — first one creates the folder).
+- **Fail-fast — don't swallow exceptions.** Let exceptions propagate so failures are visible; a crashed OpMode with a stack trace beats one limping on in a bad state. Don't add try/catch to "protect" a loop or hide a bad-state exception, and prefer removing existing exception-swallowing (empty/`ignored` catches, broad catches that only log). Numeric guards (divide-by-zero, NaN) and resource cleanup via try/**finally** (no catch — the exception still propagates) are fine. When bridging a checked exception (e.g. `Callable` → `BooleanSupplier`/`Runnable`), rethrow it as unchecked rather than returning a default.
+- Test/sample OpModes go under `opmodes/test/` (already present: `MockAuto`/`MockMechanism`/`MockRobot` framework smoke test, camera + distance-sensor tests).
 
 ## Repo conventions discovered from prior conversations
 

@@ -57,6 +57,10 @@ public class EnhancedMotor implements DcMotorEx {
         double corrected = cache.clamp(cache.applyVoltageScaling(power));
         if (cache.shouldWrite(corrected)) {
             cache.store(corrected);
+            // A power write switches the motor out of velocity mode. Invalidate the velocity cache
+            // so a later setVelocity() with the same numeric rate re-issues instead of being
+            // suppressed while the hardware is actually holding a power. Mirrors setDirection().
+            cachedVelocity = Double.NaN;
             motor.setPower(corrected);
         }
     }
@@ -85,6 +89,11 @@ public class EnhancedMotor implements DcMotorEx {
         return cache.voltageCompensationEnabled;
     }
 
+    /**
+     * Raw device for reads or SDK calls this wrapper doesn't proxy. Writing power/velocity
+     * directly through it bypasses the write cache and leaves it stale — prefer this wrapper's
+     * setters, or {@link #setPowerRaw(double)} which keeps the cache in sync.
+     */
     public DcMotorEx getUnderlying() { return motor; }
     public double getCachedPower() { return cache.cached; }
 
@@ -96,10 +105,14 @@ public class EnhancedMotor implements DcMotorEx {
     public void setVelocity(double angularRate) {
         if (angularRate == cachedVelocity) return;
         cachedVelocity = angularRate;
+        // A velocity write switches the motor out of power mode. Invalidate the power cache so a
+        // later setPower() with the same numeric power re-issues instead of being suppressed.
+        cache.store(Double.NaN);
         motor.setVelocity(angularRate);
     }
     @Override public void setVelocity(double angularRate, AngleUnit unit) {
         cachedVelocity = Double.NaN;
+        cache.store(Double.NaN);
         motor.setVelocity(angularRate, unit);
     }
     @Override public double getVelocity() { return motor.getVelocity(); }
@@ -141,7 +154,13 @@ public class EnhancedMotor implements DcMotorEx {
     @Override public int getCurrentPosition() { return motor.getCurrentPosition(); }
 
     @Override public Direction getDirection() { return motor.getDirection(); }
-    @Override public void setDirection(Direction direction) { motor.setDirection(direction); }
+    @Override public void setDirection(Direction direction) {
+        motor.setDirection(direction);
+        // A direction flip changes what the same numeric power/velocity does, but not the number
+        // itself. Drop the caches so the next setPower/setVelocity always re-issues to hardware.
+        cache.store(Double.NaN);
+        cachedVelocity = Double.NaN;
+    }
     @Override public double getPower() { return motor.getPower(); }
 
     @Override public Manufacturer getManufacturer() { return motor.getManufacturer(); }

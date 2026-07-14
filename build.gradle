@@ -12,7 +12,10 @@ buildscript {
     // predates the Sloth-fork swap; bump to a newer tag once one is cut.
     ext.slothboardRef = 'edd4aca'
     ext {
-        kotlin_version = '2.3.20'
+        // Single source of truth for the Kotlin Gradle plugin version (used in the
+        // classpath below). Kotlin 2.4.0 fully supports Gradle 7.6.3–9.5.0, so the
+        // pinned Gradle 8.9 is within range.
+        kotlin_version = '2.4.0'
     }
     repositories {
         mavenCentral()
@@ -23,7 +26,7 @@ buildscript {
         // Note for FTC Teams: Do not modify this yourself.
         classpath 'com.android.tools.build:gradle:8.7.0'
         classpath "com.github.6165-MSET-Cuttlefish.Sloth:Load:${slothRef}"
-        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.0"
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
     }
 }
 

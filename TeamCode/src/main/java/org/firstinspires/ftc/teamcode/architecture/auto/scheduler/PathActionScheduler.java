@@ -5,23 +5,20 @@ import com.pedropathing.follower.Follower;
 import com.pedropathing.geometry.BezierLine;
 import com.pedropathing.geometry.Pose;
 import com.pedropathing.paths.PathChain;
-import com.qualcomm.robotcore.util.RobotLog;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.function.LongSupplier;
-import org.firstinspires.ftc.teamcode.core.action.Action;
-import org.firstinspires.ftc.teamcode.core.action.Actions;
-import org.firstinspires.ftc.teamcode.core.Robot;
-import org.firstinspires.ftc.teamcode.core.State;
+import org.firstinspires.ftc.teamcode.architecture.action.Action;
+import org.firstinspires.ftc.teamcode.architecture.action.Actions;
+import org.firstinspires.ftc.teamcode.architecture.core.State;
 
 /**
  * Drives a list of {@link PathActionSegment}s through a small state machine. Each {@link #update()}
  * advances by exactly one transition, so the scheduler never blocks the OpMode loop.
  */
 public class PathActionScheduler {
-    private static final String TAG = "PathActionScheduler";
-
     private final Follower follower;
     private final LongSupplier clock;
 
@@ -40,23 +37,24 @@ public class PathActionScheduler {
     // Armed once distance-remaining exceeds holdAtDistance, so a short path / oversized threshold
     // can't short-circuit the drive on the first PATH_RUNNING tick.
     private boolean leftHoldStart = false;
+    // holdAtDistance for a resolver segment, captured at follow time (the segment itself has none).
+    private Double activeResolvedHoldAtDistance = null;
 
     private final List<Callable<Boolean>> overrideConditions = new ArrayList<>();
     private Runnable overrideCallback = null;
     private boolean overrideTriggered = false;
 
-    public PathActionScheduler() {
-        this(null, null);
+    public PathActionScheduler(Follower follower) {
+        this(follower, null);
     }
 
     public PathActionScheduler(Follower follower, LongSupplier clock) {
-        // null follower → late-bind to Robot.robot.follower at use time.
-        this.follower = follower;
+        this.follower = Objects.requireNonNull(follower, "follower");
         this.clock = clock != null ? clock : SystemClock::elapsedRealtime;
     }
 
     private Follower follower() {
-        return follower != null ? follower : Robot.robot.follower;
+        return follower;
     }
 
     private long now() {
@@ -102,7 +100,10 @@ public class PathActionScheduler {
 
     public void cancelAll() {
         cancelAsyncOperations();
-        stopCurrentPath();
+        // abort=true: a hard cancel (override/abort or OpMode stop) must stop the drivetrain in
+        // place, not re-engage Pedro's end-hold — which re-commands the path and drives to the
+        // chain end. Runs before any override callback, so a callback that redirects still wins.
+        stopCurrentPath(true);
         Actions.cancelAll();
     }
 
@@ -123,6 +124,9 @@ public class PathActionScheduler {
         if (overrideTriggered) return;
         overrideTriggered = true;
         cancelAll();
+        // Mark the run finished so getCurrentState()/skipCurrentSegment() don't report a stale
+        // PATH_RUNNING/AFTER_ACTION after the abort.
+        currentState = SchedulerState.COMPLETED;
         if (overrideCallback != null) overrideCallback.run();
     }
 
@@ -139,6 +143,12 @@ public class PathActionScheduler {
 
         // Honor after-actions on timeout so "drive then shoot" still shoots if the drive runs long.
         if (currentState != SchedulerState.IDLE && hasTimedOut(segment)) {
+            // If after-actions are already in flight, let them finish — advancing here would
+            // cancelAsyncOperations() them mid-run, breaking the "always honor after-actions" contract.
+            if (currentState == SchedulerState.AFTER_ACTION) {
+                if (areActionsComplete()) beginWaiting(segment);
+                return;
+            }
             if (currentState == SchedulerState.PATH_RUNNING) stopCurrentPath();
             if (tryStartAfterActions(segment)) return;
             advanceToNextSegment();
@@ -205,6 +215,7 @@ public class PathActionScheduler {
         leftHoldStart = false;
         activeResolvedChain = null;
         activeResolvedHoldEnd = false;
+        activeResolvedHoldAtDistance = null;
         cancelAsyncOperations();
 
         List<State> states = segment.getModuleStates();
@@ -242,6 +253,7 @@ public class PathActionScheduler {
                 holdEnd = r.holdEnd;
                 activeResolvedChain = chain;
                 activeResolvedHoldEnd = holdEnd;
+                activeResolvedHoldAtDistance = r.holdAtDistance;
             } else {
                 chain = segment.getPath();
                 during = segment.getDuringActions();
@@ -286,6 +298,7 @@ public class PathActionScheduler {
         leftHoldStart = false;
         activeResolvedChain = null;
         activeResolvedHoldEnd = false;
+        activeResolvedHoldAtDistance = null;
     }
 
     private void cancelAsyncOperations() {
@@ -295,7 +308,12 @@ public class PathActionScheduler {
         activeDuringActions.clear();
     }
 
+    /** Skip/timeout stop: re-engage Pedro's end-hold so the next segment starts from a known pose. */
     private void stopCurrentPath() {
+        stopCurrentPath(false);
+    }
+
+    private void stopCurrentPath(boolean abort) {
         PathActionSegment segment = getCurrentSegment();
         if (segment == null) return;
 
@@ -319,12 +337,14 @@ public class PathActionScheduler {
 
         // Re-issuing followPath(chain, true) is how we ask Pedro to engage its end-hold; otherwise
         // stop driving outright so a timed-out/skipped segment never leaves the robot coasting.
-        if (holdEnd && chain != null) follower().followPath(chain, true);
+        // On abort, always break: re-engaging end-hold would drive the robot to the chain end.
+        if (!abort && holdEnd && chain != null) follower().followPath(chain, true);
         else follower().breakFollowing();
     }
 
     /** Skip the current segment but still fire its after-actions (cleanup still runs). */
     public void skipCurrentSegment() {
+        if (overrideTriggered) return;
         PathActionSegment segment = getCurrentSegment();
         if (segment == null) return;
         if (currentState == SchedulerState.PATH_RUNNING) stopCurrentPath();
@@ -374,9 +394,16 @@ public class PathActionScheduler {
     }
 
     private boolean shouldHoldAtDistance(PathActionSegment segment) {
-        Double distance = segment.getHoldAtDistance();
+        // A resolver segment carries its holdAtDistance on the resolved bundle, not the segment.
+        Double distance = segment.hasResolver() ? activeResolvedHoldAtDistance : segment.getHoldAtDistance();
         if (distance == null) return false;
-        double remaining = follower().getDistanceRemaining();
+        // Whole-chain remaining, not the current leg: a multi-leg TrackingPathBuilder chain must not
+        // advance the state machine when only the FIRST leg is within the threshold.
+        double remaining = follower().getTotalDistanceRemaining();
+        // Pedro returns -1 for a chain with DecelerationType.NONE (setNoDeceleration()); whole-chain
+        // remaining is unavailable, so fall back to current-leg remaining rather than silently
+        // disabling the early-advance (which would make the segment wait for full path completion).
+        if (remaining < 0) remaining = follower().getDistanceRemaining();
         if (remaining > distance) {
             // Real distance still ahead — arm the early-advance for when we get close.
             leftHoldStart = true;
@@ -410,8 +437,9 @@ public class PathActionScheduler {
         try {
             return condition.call();
         } catch (Exception e) {
-            RobotLog.ee(TAG, "condition threw " + e.getClass().getSimpleName() + ": " + e.getMessage(), e);
-            return false;
+            // Propagate (fail-fast) rather than swallowing a throwing condition into a silent
+            // "false" that reads as "not yet true" forever.
+            throw new RuntimeException(e);
         }
     }
 

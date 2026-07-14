@@ -8,8 +8,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.function.Supplier;
-import org.firstinspires.ftc.teamcode.core.action.Action;
-import org.firstinspires.ftc.teamcode.core.State;
+import org.firstinspires.ftc.teamcode.architecture.action.Action;
+import org.firstinspires.ftc.teamcode.architecture.core.State;
 
 public class PathActionSegment {
 
@@ -18,11 +18,17 @@ public class PathActionSegment {
         public final PathChain path;
         public final List<Action> duringActions;
         public final boolean holdEnd;
+        public final Double holdAtDistance;
 
         public Resolved(PathChain path, List<Action> duringActions, boolean holdEnd) {
+            this(path, duringActions, holdEnd, null);
+        }
+
+        public Resolved(PathChain path, List<Action> duringActions, boolean holdEnd, Double holdAtDistance) {
             this.path = path;
             this.duringActions = duringActions;
             this.holdEnd = holdEnd;
+            this.holdAtDistance = holdAtDistance;
         }
     }
 
