@@ -87,6 +87,15 @@ public class FieldVisualizer {
     // for. Editable via Dashboard config if you want tighter/looser margins.
     public static double CLEARANCE_IN = ROBOT_SIZE_IN / 2.0;
 
+    // ---- Intake width used for route-efficiency planning ----
+    // Defaults to the full robot width, since the intake currently spans the
+    // whole front of the robot. Any ball within half this distance of a
+    // straight-line pass gets swept up incidentally, without the intake
+    // route needing to bend to touch it exactly - see
+    // BallCollectionOpMode.essentialIntakeStops(). Lower this if the intake
+    // is ever narrower than the chassis.
+    public static double INTAKE_WIDTH_IN = ROBOT_SIZE_IN;
+
     // ── colours ──────────────────────────────────────────────────────────────
     private static final String COLOR_PATH_CLEAR   = "#00C853"; // green
     private static final String COLOR_PATH_BLOCKED = "#D50000"; // red
