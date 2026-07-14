@@ -86,6 +86,12 @@ public class EnhancedServo implements Servo, PwmControl {
     @Override public void setPwmRange(PwmRange range) { servo.setPwmRange(range); }
     @Override public PwmRange getPwmRange() { return servo.getPwmRange(); }
     @Override public void setPwmEnable() { servo.setPwmEnable(); }
-    @Override public void setPwmDisable() { servo.setPwmDisable(); }
+    @Override public void setPwmDisable() {
+        servo.setPwmDisable();
+        // A position write re-enables PWM on the SDK side. Drop the cache so the next setPosition()
+        // to the same value actually reaches hardware and wakes the servo, instead of being
+        // suppressed as a no-op. Mirrors setDirection().
+        cache.store(Double.NaN);
+    }
     @Override public boolean isPwmEnabled() { return servo.isPwmEnabled(); }
 }

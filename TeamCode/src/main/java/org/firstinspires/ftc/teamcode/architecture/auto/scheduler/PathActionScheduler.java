@@ -100,7 +100,10 @@ public class PathActionScheduler {
 
     public void cancelAll() {
         cancelAsyncOperations();
-        stopCurrentPath();
+        // abort=true: a hard cancel (override/abort or OpMode stop) must stop the drivetrain in
+        // place, not re-engage Pedro's end-hold — which re-commands the path and drives to the
+        // chain end. Runs before any override callback, so a callback that redirects still wins.
+        stopCurrentPath(true);
         Actions.cancelAll();
     }
 
@@ -305,7 +308,12 @@ public class PathActionScheduler {
         activeDuringActions.clear();
     }
 
+    /** Skip/timeout stop: re-engage Pedro's end-hold so the next segment starts from a known pose. */
     private void stopCurrentPath() {
+        stopCurrentPath(false);
+    }
+
+    private void stopCurrentPath(boolean abort) {
         PathActionSegment segment = getCurrentSegment();
         if (segment == null) return;
 
@@ -329,7 +337,8 @@ public class PathActionScheduler {
 
         // Re-issuing followPath(chain, true) is how we ask Pedro to engage its end-hold; otherwise
         // stop driving outright so a timed-out/skipped segment never leaves the robot coasting.
-        if (holdEnd && chain != null) follower().followPath(chain, true);
+        // On abort, always break: re-engaging end-hold would drive the robot to the chain end.
+        if (!abort && holdEnd && chain != null) follower().followPath(chain, true);
         else follower().breakFollowing();
     }
 
@@ -391,6 +400,10 @@ public class PathActionScheduler {
         // Whole-chain remaining, not the current leg: a multi-leg TrackingPathBuilder chain must not
         // advance the state machine when only the FIRST leg is within the threshold.
         double remaining = follower().getTotalDistanceRemaining();
+        // Pedro returns -1 for a chain with DecelerationType.NONE (setNoDeceleration()); whole-chain
+        // remaining is unavailable, so fall back to current-leg remaining rather than silently
+        // disabling the early-advance (which would make the segment wait for full path completion).
+        if (remaining < 0) remaining = follower().getDistanceRemaining();
         if (remaining > distance) {
             // Real distance still ahead — arm the early-advance for when we get close.
             leftHoldStart = true;

@@ -57,6 +57,10 @@ public class EnhancedMotor implements DcMotorEx {
         double corrected = cache.clamp(cache.applyVoltageScaling(power));
         if (cache.shouldWrite(corrected)) {
             cache.store(corrected);
+            // A power write switches the motor out of velocity mode. Invalidate the velocity cache
+            // so a later setVelocity() with the same numeric rate re-issues instead of being
+            // suppressed while the hardware is actually holding a power. Mirrors setDirection().
+            cachedVelocity = Double.NaN;
             motor.setPower(corrected);
         }
     }
@@ -101,10 +105,14 @@ public class EnhancedMotor implements DcMotorEx {
     public void setVelocity(double angularRate) {
         if (angularRate == cachedVelocity) return;
         cachedVelocity = angularRate;
+        // A velocity write switches the motor out of power mode. Invalidate the power cache so a
+        // later setPower() with the same numeric power re-issues instead of being suppressed.
+        cache.store(Double.NaN);
         motor.setVelocity(angularRate);
     }
     @Override public void setVelocity(double angularRate, AngleUnit unit) {
         cachedVelocity = Double.NaN;
+        cache.store(Double.NaN);
         motor.setVelocity(angularRate, unit);
     }
     @Override public double getVelocity() { return motor.getVelocity(); }

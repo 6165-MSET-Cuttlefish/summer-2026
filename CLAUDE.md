@@ -68,7 +68,7 @@ The team's framework lives under `TeamCode/src/main/java/org/firstinspires/ftc/t
 - **`architecture/action/`** — `Action`, `ActionBuilder`, `Actions` (cooperative single-thread scheduler).
 - **`architecture/`** — other supporting wrappers and infrastructure.
   - `OptimizationToggles.java` — framework-wide `@Config` toggles for telemetry cadence, profiler enable, etc.
-  - `auto/` — Pedro Pathing setup + path-action scheduler. `PedroSetup` builds the Follower; `RobotHardwareConfig` holds the per-robot hardware names; `scheduler/*` is the autonomous DSL on top of Pedro (its builders/scheduler take an injected `Follower` + game-time supplier — there is no `Robot.robot` service locator).
+  - `auto/` — Pedro Pathing setup + path-action scheduler. `PedroSetup` is a **per-robot selector** (`PedroSetup.activeRobot` ∈ `{BETTA, DECODE}`, `@Config`) whose `createFollower(...)` dispatches to `BettaPedroSetup`+`BettaHardwareConfig` or `DecodePedroSetup`+`DecodeHardwareConfig` (tuning + hardware wiring split per robot). DECODE OpModes pin `activeRobot=DECODE` in `DecodeOpMode.createRobot()` before the follower is built. `scheduler/*` is the autonomous DSL on top of Pedro (its builders/scheduler take an injected `Follower` + game-time supplier — there is no `Robot.robot` service locator).
   - `control/` — `PidController` (PID + feed-forward + static-friction kick).
   - `hardware/` — `EnhancedMotor`, `EnhancedServo`, `EnhancedCRServo`, `WriteCache`, `BatteryVoltage`, `AbsoluteAnalogEncoder`, `LaserRangefinder`.
   - `input/` — gamepad layering and edge-detecting suppliers: `LayerStack`, `LayeredGamepad`, `LayerGamepad`, `EdgeBooleanSupplier`, `CachedDoubleSupplier`, `InputClock` (per-loop frame counter advanced by `EnhancedOpMode` so edge suppliers refresh exactly once per loop).
@@ -113,7 +113,7 @@ optional Thread.sleep       // if minLoopMs forces a floor
 
 `Actions.update()` runs **between** `gameLoop()` and `writeModules()` so action-applied state lands in the same write pass as user code. Don't move it.
 
-`stop()` cancels all actions, cancels the path-action scheduler, calls `module.stop()` on every module (each in a try/catch so one bad module doesn't block the rest), then `onEnd()`.
+`stop()` cancels all actions, cancels the path-action scheduler, calls `module.stop()` on every module then `onEnd()` — this is the framework's safe-state pass, so it is best-effort: each `module.stop()` and `onEnd()` runs even if an earlier one throws (the SDK does not auto-zero motors on stop), and the **first** captured `Throwable` is rethrown after all of them have run, preserving fail-fast visibility without leaving hardware energized because an unrelated module threw first.
 
 ## Module pattern
 
@@ -214,8 +214,8 @@ The scheduler is pumped from your auto's `gameLoop()`:
 There are three layers of "knob," in order of where to look:
 
 1. **Per-mechanism `@Config static class Tuning`** — setpoints, gains, offsets. Pair with `Module.bindTunable(state, () -> Tuning.x)` so dashboard edits land in the next `read()`.
-2. **`PedroSetup`** (`architecture/auto/`) — Pedro `FollowerConstants` / `MecanumConstants` / `PinpointConstants` / `PathConstraints`. Edit when retuning path follow.
-3. **`RobotHardwareConfig`** (`architecture/auto/`) — motor names, motor directions, Pinpoint pod offsets. Fields are `final`; edit only when wiring a new robot.
+2. **`{Betta,Decode}PedroSetup`** (`architecture/auto/`) — per-robot Pedro `FollowerConstants` / `MecanumConstants` / `PinpointConstants` / `PathConstraints`. Edit the robot's file when retuning path follow. `PedroSetup.activeRobot` selects which one `createFollower` uses.
+3. **`{Betta,Decode}HardwareConfig`** (`architecture/auto/`) — per-robot motor names, motor directions, Pinpoint pod offsets. Fields are `final`; edit the robot's file when wiring that robot. (Betta and DECODE differ in the strafe-pod encoder direction.)
 
 Plus framework-wide knobs:
 

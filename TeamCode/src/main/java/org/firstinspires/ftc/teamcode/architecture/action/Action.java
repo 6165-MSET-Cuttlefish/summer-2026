@@ -58,7 +58,19 @@ public final class Action {
      * mutable Step state with its host, so scheduling it independently would corrupt both — the
      * scheduler refuses it. Build a fresh action per use instead.
      */
-    void markEmbedded() { embedded = true; }
+    void markEmbedded() {
+        // Fail loud on re-composition: composing the SAME action instance into two parents (or twice
+        // into one) makes them share these mutable Step instances (Delay start time, Retry attempts,
+        // Repeat/Loop counters), so both would corrupt each other's timing. Deep-copying steps would
+        // be the alternative; failing here keeps the invariant simple — build a fresh action per use.
+        if (embedded) {
+            throw new IllegalStateException(
+                    "Action '" + name + "' is being composed into a second action. A composed action "
+                    + "shares mutable step state with its host; reusing one instance corrupts both. "
+                    + "Build a fresh action each time (e.g. return a new Actions.builder()...build()).");
+        }
+        embedded = true;
+    }
     boolean isEmbedded() { return embedded; }
 
     public float getProgress() {

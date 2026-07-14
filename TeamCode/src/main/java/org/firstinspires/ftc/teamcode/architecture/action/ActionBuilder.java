@@ -200,31 +200,37 @@ public final class ActionBuilder {
         @Override protected boolean tick(Action parent) { return true; }
     }
 
+    // Time-based steps use System.nanoTime() (monotonic) rather than System.currentTimeMillis():
+    // the Driver Station pushes wall-clock time to the Control Hub on connect and on mid-match
+    // reconnect, so currentTimeMillis can step backward (delay never completes) or forward (delay
+    // fires early) during a match. nanoTime elapsed via subtraction is overflow-safe.
+    private static final long MS_TO_NS = 1_000_000L;
+
     private static final class Delay extends Action.Step {
         private final long ms;
-        private long startMs;
+        private long startNanos;
         Delay(long ms) { this.ms = ms; }
-        @Override protected void start(Action parent) { startMs = System.currentTimeMillis(); }
+        @Override protected void start(Action parent) { startNanos = System.nanoTime(); }
         @Override
         protected boolean tick(Action parent) {
-            return System.currentTimeMillis() - startMs >= ms;
+            return System.nanoTime() - startNanos >= ms * MS_TO_NS;
         }
     }
 
     private static final class WaitUntil extends Action.Step {
         private final BooleanSupplier condition;
         private final long timeoutMs;
-        private long startMs;
+        private long startNanos;
         WaitUntil(BooleanSupplier condition, long timeoutMs) {
             this.condition = condition;
             this.timeoutMs = timeoutMs;
         }
-        @Override protected void start(Action parent) { startMs = System.currentTimeMillis(); }
+        @Override protected void start(Action parent) { startNanos = System.nanoTime(); }
         @Override
         protected boolean tick(Action parent) {
             if (condition.getAsBoolean()) return true;
             if (timeoutMs == Long.MAX_VALUE) return false;
-            return System.currentTimeMillis() - startMs >= timeoutMs;
+            return System.nanoTime() - startNanos >= timeoutMs * MS_TO_NS;
         }
     }
 
@@ -334,7 +340,7 @@ public final class ActionBuilder {
     private static final class Timeout extends Action.Step {
         private final Action action;
         private final long ms;
-        private long startMs;
+        private long startNanos;
 
         Timeout(Action action, long ms) {
             this.action = action;
@@ -344,13 +350,13 @@ public final class ActionBuilder {
         @Override
         protected void start(Action parent) {
             action.reset();
-            startMs = System.currentTimeMillis();
+            startNanos = System.nanoTime();
         }
 
         @Override
         protected boolean tick(Action parent) {
             if (action.tick()) return true;
-            if (System.currentTimeMillis() - startMs >= ms) {
+            if (System.nanoTime() - startNanos >= ms * MS_TO_NS) {
                 action.cancel();
                 return true;
             }
@@ -441,7 +447,8 @@ public final class ActionBuilder {
         private final long delayMs;
         private final BooleanSupplier success;
         private int attempts;
-        private long resumeAtMs;
+        private boolean waitingRetryDelay;
+        private long retryDelayStartNanos;
 
         Retry(Action action, int maxAttempts, long delayMs, BooleanSupplier success) {
             this.action = action;
@@ -453,15 +460,15 @@ public final class ActionBuilder {
         @Override
         protected void start(Action parent) {
             attempts = 0;
-            resumeAtMs = 0L;
+            waitingRetryDelay = false;
             action.reset();
         }
 
         @Override
         protected boolean tick(Action parent) {
-            if (resumeAtMs > 0L) {
-                if (System.currentTimeMillis() < resumeAtMs) return false;
-                resumeAtMs = 0L;
+            if (waitingRetryDelay) {
+                if (System.nanoTime() - retryDelayStartNanos < delayMs * MS_TO_NS) return false;
+                waitingRetryDelay = false;
                 action.reset();
             }
             if (action.tick()) {
@@ -469,7 +476,8 @@ public final class ActionBuilder {
                 attempts++;
                 if (success.getAsBoolean() || attempts >= maxAttempts) return true;
                 if (delayMs > 0) {
-                    resumeAtMs = System.currentTimeMillis() + delayMs;
+                    waitingRetryDelay = true;
+                    retryDelayStartNanos = System.nanoTime();
                 } else {
                     action.reset();
                 }

@@ -104,6 +104,11 @@ public class EnhancedCRServo implements CRServo, PwmControl {
     @Override public void setPwmRange(PwmRange range) { crServo.setPwmRange(range); }
     @Override public PwmRange getPwmRange() { return crServo.getPwmRange(); }
     @Override public void setPwmEnable() { crServo.setPwmEnable(); }
-    @Override public void setPwmDisable() { crServo.setPwmDisable(); }
+    @Override public void setPwmDisable() {
+        crServo.setPwmDisable();
+        // A power write re-enables PWM on the SDK side. Drop the cache so the next setPower() to the
+        // same value actually reaches hardware and re-powers the CRServo. Mirrors setDirection().
+        cache.store(Double.NaN);
+    }
     @Override public boolean isPwmEnabled() { return crServo.isPwmEnabled(); }
 }

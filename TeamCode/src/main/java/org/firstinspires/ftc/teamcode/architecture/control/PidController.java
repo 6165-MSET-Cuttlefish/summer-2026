@@ -123,7 +123,11 @@ public class PidController {
                 // (e.g. heading in [-π, π]) sees a ~2π jump at the wrap boundary and spikes D.
                 errorDerivative = -wrapError(position - previousPosition) / deltaTimeSeconds;
             } else {
-                errorDerivative = (error - previousError) / deltaTimeSeconds;
+                // wrapError the error delta too: with continuous input, error and previousError are
+                // each wrapped into [-range/2, range/2), so a measurement crossing the wrap boundary
+                // makes their raw difference ~±range and spikes D. wrapError is a no-op when
+                // continuous is disabled, so the linear case is unaffected.
+                errorDerivative = wrapError(error - previousError) / deltaTimeSeconds;
             }
         } else {
             errorDerivative = 0;

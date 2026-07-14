@@ -277,12 +277,29 @@ public abstract class EnhancedOpMode extends OpMode {
         if (robot != null && robot.pathActionScheduler != null) {
             robot.pathActionScheduler.cancelAll();
         }
-        // Modules can put hardware in a safe state with nothing else racing them. No try/catch:
-        // a throwing stop() propagates (fail-fast) so the failure surfaces instead of being hidden.
+        // stop() is the framework's safe-state pass: every module must get a chance to zero its
+        // hardware even if an earlier module's stop() throws (the SDK does NOT auto-zero motors on
+        // OpMode stop, and a normal STOP keeps the RC keepalive alive so the Lynx failsafe never
+        // trips). We still fail-fast overall — the first Throwable is captured and rethrown after
+        // every module and onEnd() have run, so the failure still surfaces, but nothing is left
+        // energized because an unrelated module threw first.
+        Throwable first = null;
         for (int i = 0; i < modules.size(); i++) {
-            modules.get(i).stop();
+            try {
+                modules.get(i).stop();
+            } catch (Throwable t) {
+                if (first == null) first = t;
+            }
         }
-        onEnd();
+        try {
+            onEnd();
+        } catch (Throwable t) {
+            if (first == null) first = t;
+        }
+        if (first != null) {
+            if (first instanceof RuntimeException) throw (RuntimeException) first;
+            throw (Error) first;
+        }
     }
 
     /** Manually register modules; reflection auto-discovery picks up the rest. */
@@ -297,6 +314,12 @@ public abstract class EnhancedOpMode extends OpMode {
         Set<Object> visited = Collections.newSetFromMap(new IdentityHashMap<>());
         try {
             discover(this, getClass(), visited);
+            // discover() walks the subclass field hierarchy only down to (excluding) EnhancedOpMode,
+            // so the inherited `robot` field is NOT a discovery root. An OpMode that returns its Robot
+            // from createRobot() and only ever reads the inherited (base-typed) `robot` — with no
+            // redundant typed field — would otherwise register zero modules silently. Seed from it
+            // directly; idempotent via the visited set when a typed field already reached the robot.
+            discoverValue(robot, visited);
         } catch (IllegalAccessException e) {
             throw new RuntimeException("Module auto-discovery failed", e);
         }
@@ -426,6 +449,12 @@ public abstract class EnhancedOpMode extends OpMode {
             // Pending items carry over; calling update() here would cause partial-packet flicker.
             return;
         }
+
+        // Wire the documented Robot.telemetryToggles DS/dashboard switches to the actual backend
+        // gates (Decode did this in updateWriteToggles(); the summer refactor dropped the wiring,
+        // leaving both fields dead). Cheap two-boolean write on render loops only.
+        DualTelemetry.enableDSTelemetry = telemetryToggles.dsTelemetry;
+        DualTelemetry.enableDashboardTelemetry = telemetryToggles.dashboardTelemetry;
 
         addStatusTelemetry();
 
