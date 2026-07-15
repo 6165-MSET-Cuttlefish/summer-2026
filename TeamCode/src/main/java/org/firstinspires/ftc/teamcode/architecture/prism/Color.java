@@ -52,6 +52,5 @@ public class Color {
     public static final Color PURPLE      = new Color(128, 0,   128);
     public static final Color PINK        = new Color(255, 20,  128);
     public static final Color WHITE       = new Color(255, 255, 255);
-    public static final Color ICE_BLUE    = new Color(150, 220, 255);
     public static final Color TRANSPARENT = new Color(0,   0,   0);
 }

@@ -85,6 +85,9 @@ public class HomographyCalculationPipeline extends OpenCvPipeline {
     private final Telemetry    telemetry;
     private final MatOfPoint2f dstCorners;
     private final Mat          warped = new Mat();
+    // Reused output buffer. Was allocated per-frame → a full-resolution native Mat leaked every
+    // frame once locked (the EasyOpenCV viewport copies pixels out, it doesn't take ownership).
+    private final Mat          output = new Mat();
 
     private final Thread detectionThread;
 
@@ -108,8 +111,7 @@ public class HomographyCalculationPipeline extends OpenCvPipeline {
             // Warp into the fixed-size canvas defined by OUTPUT_WIDTH_PX / OUTPUT_HEIGHT_PX
             Imgproc.warpPerspective(input, warped, lockedHomography.get(), WARP_SIZE);
 
-            // Stretch the warped result back to the original camera resolution
-            Mat output = new Mat();
+            // Stretch the warped result back to the original camera resolution (reused buffer).
             Imgproc.resize(warped, output,
                     new Size(input.width(), input.height()),
                     0, 0, Imgproc.INTER_LINEAR);
@@ -192,7 +194,9 @@ public class HomographyCalculationPipeline extends OpenCvPipeline {
             return;
         }
 
-        candidateHomography.set(h);
+        // Release the previous candidate we're superseding so it doesn't leak each frame before lock.
+        Mat oldCandidate = candidateHomography.getAndSet(h);
+        if (oldCandidate != null) oldCandidate.release();
         statusLine = "Board found — confirming...";
 
         if (confirmCount.incrementAndGet() >= FRAMES_TO_CONFIRM) {

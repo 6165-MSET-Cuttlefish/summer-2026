@@ -76,6 +76,12 @@ public final class HardwareTest {
             telemetry.addLine("Left stick Y: power");
             telemetry.update();
         }
+
+        @Override
+        public final void stop() {
+            // The SDK doesn't zero motor power on STOP; do it so the mechanism can't keep driving.
+            if (motor != null) motor.setPower(0.0);
+        }
     }
 
     /** Left stick Y drives power. */
@@ -99,6 +105,12 @@ public final class HardwareTest {
             telemetry.addData("power",    "%.2f", power);
             telemetry.addLine("Left stick Y: power");
             telemetry.update();
+        }
+
+        @Override
+        public final void stop() {
+            // The SDK doesn't zero CR-servo power on STOP; do it so the mechanism can't keep driving.
+            if (servo != null) servo.setPower(0.0);
         }
     }
 }

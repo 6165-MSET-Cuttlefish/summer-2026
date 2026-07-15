@@ -1,7 +1,5 @@
 package org.firstinspires.ftc.teamcode.architecture.auto;
 
-import static org.firstinspires.ftc.teamcode.core.Robot.robot;
-
 import com.acmerobotics.dashboard.canvas.Canvas;
 import com.pedropathing.ftc.FTCCoordinates;
 import com.pedropathing.geometry.Pose;
@@ -31,13 +29,7 @@ public class FieldVisualization {
         return new double[]{ transY, -transX };
     }
 
-    public static Canvas getCanvas() {
-        return robot.packet.fieldOverlay();
-    }
-
-    public static void drawRobot(Pose pose) {
-        Canvas canvas = robot.packet.fieldOverlay();
-
+    public static void drawRobot(Canvas canvas, Pose pose) {
         Pose canvasPose = toField(pose);
         double cx = canvasPose.getX();
         double cy = canvasPose.getY();
@@ -51,30 +43,23 @@ public class FieldVisualization {
                 cy + heading.getYComponent() * ROBOT_RADIUS);
     }
 
-    public static void drawPath(Path path, String color) {
-        Canvas canvas = robot.packet.fieldOverlay();
+    public static void drawPath(Canvas canvas, Path path, String color) {
         canvas.setStroke(color);
-
-        try {
-            double[][] points = path.getPanelsDrawingPoints(); // points[0] = x‑array, points[1] = y‑array
-            for (int i = 0; i < points[0].length - 1; i++) {
-                double[] p1 = toField(points[0][i], points[1][i]);
-                double[] p2 = toField(points[0][i + 1], points[1][i + 1]);
-                canvas.strokeLine(p1[0], p1[1], p2[0], p2[1]);
-            }
-        } catch (Exception e) {
-            System.err.println("FieldVisualization: drawPath failed: " + e.getMessage());
+        double[][] points = path.getPanelsDrawingPoints(); // points[0] = x‑array, points[1] = y‑array
+        for (int i = 0; i < points[0].length - 1; i++) {
+            double[] p1 = toField(points[0][i], points[1][i]);
+            double[] p2 = toField(points[0][i + 1], points[1][i + 1]);
+            canvas.strokeLine(p1[0], p1[1], p2[0], p2[1]);
         }
     }
 
-    public static void drawPath(PathChain pathChain, String color) {
+    public static void drawPath(Canvas canvas, PathChain pathChain, String color) {
         for (int i = 0; i < pathChain.size(); i++) {
-            drawPath(pathChain.getPath(i), color);
+            drawPath(canvas, pathChain.getPath(i), color);
         }
     }
 
-    public static void drawPoseHistory(PoseHistory poseHistory) {
-        Canvas canvas = robot.packet.fieldOverlay();
+    public static void drawPoseHistory(Canvas canvas, PoseHistory poseHistory) {
         canvas.setStroke(COLOR_HISTORY);
 
         double[] x = poseHistory.getXPositionsArray();

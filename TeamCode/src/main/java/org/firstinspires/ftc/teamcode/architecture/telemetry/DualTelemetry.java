@@ -18,12 +18,27 @@ public class DualTelemetry implements Telemetry {
     private final Telemetry dsTelemetry;
     private final Telemetry dashTelemetry;
     private int defaultFontSize = FONT_NORMAL;
+    private boolean dsFormatApplied = false;
     private static final Item EMPTY_ITEM = new EnhancedItem(null, null);
 
     public DualTelemetry(Telemetry dsTelemetry, Telemetry dashTelemetry) {
         this.dsTelemetry = dsTelemetry;
         this.dashTelemetry = dashTelemetry;
-        if (enableDSTelemetry) dsTelemetry.setDisplayFormat(DisplayFormat.HTML);
+        ensureDsFormat();
+    }
+
+    /**
+     * DS HTML mode is a one-shot setDisplayFormat() call, so toggling {@code enableDSTelemetry}
+     * off→on at runtime would otherwise leave raw HTML tags on the Driver Station. Re-apply it
+     * whenever DS telemetry is (re-)enabled; called each update().
+     */
+    private void ensureDsFormat() {
+        if (enableDSTelemetry && !dsFormatApplied) {
+            dsTelemetry.setDisplayFormat(DisplayFormat.HTML);
+            dsFormatApplied = true;
+        } else if (!enableDSTelemetry) {
+            dsFormatApplied = false;
+        }
     }
 
     public void setDSTransmissionInterval(int interval) {
@@ -142,6 +157,9 @@ public class DualTelemetry implements Telemetry {
 
     @Override
     public <T> Item addData(String caption, Func<T> valueProducer) {
+        if (telemetryLazyFormat && !enableDSTelemetry && !enableDashboardTelemetry) {
+            return EMPTY_ITEM;
+        }
         Func<String> htmlProducer = () -> fmtValue(valueProducer.value());
         Item dsItem = enableDSTelemetry
                 ? dsTelemetry.addData(fmtCaption(caption), htmlProducer)
@@ -154,6 +172,9 @@ public class DualTelemetry implements Telemetry {
 
     @Override
     public <T> Item addData(String caption, String format, Func<T> valueProducer) {
+        if (telemetryLazyFormat && !enableDSTelemetry && !enableDashboardTelemetry) {
+            return EMPTY_ITEM;
+        }
         Func<String> htmlProducer = () -> fmtValue(String.format(format, valueProducer.value()));
         Item dsItem = enableDSTelemetry
                 ? dsTelemetry.addData(fmtCaption(caption), htmlProducer)
@@ -218,6 +239,7 @@ public class DualTelemetry implements Telemetry {
 
     @Override
     public boolean update() {
+        ensureDsFormat();
         // Telemetry contract: true if transmitted. Fan-out → "any backend transmitted".
         if (!enableDSTelemetry && !enableDashboardTelemetry) return true;
         boolean ds = enableDSTelemetry && dsTelemetry.update();

@@ -1,10 +1,10 @@
-package org.firstinspires.ftc.teamcode.core;
+package org.firstinspires.ftc.teamcode.architecture.core;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-import org.firstinspires.ftc.teamcode.core.action.Action;
-import org.firstinspires.ftc.teamcode.core.action.Actions;
+import org.firstinspires.ftc.teamcode.architecture.action.Action;
+import org.firstinspires.ftc.teamcode.architecture.action.Actions;
 
 /**
  * Marker interface for state-machine states. Implement on an enum, set the numeric setpoint
@@ -20,12 +20,6 @@ public interface State {
     Map<State, Module> MODULES = new ConcurrentHashMap<>();
 
     static void clearModuleBindings() {
-        MODULES.clear();
-    }
-
-    static void clearAll() {
-        VALUES.clear();
-        INITIAL_VALUES.clear();
         MODULES.clear();
     }
 
