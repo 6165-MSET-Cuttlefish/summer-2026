@@ -60,6 +60,18 @@ public class PurePursuitTuner extends LinearOpMode {
                 .addControlPoint(0, 36)
                 .addControlPoint(36,36)
                 .build();
+
+        Bezier line = PurePursuit.builder
+                .addControlPoint(0, 0)
+                .addControlPoint(86, 0)
+                .build();
+
+        Bezier l_spline = PurePursuit.builder
+                .addControlPoint(0,0)
+                .addControlPoint(48,-6)
+                .addControlPoint(60, 6)
+                .addControlPoint(60, 40)
+                .build();
         waitForStart();
 
 //        while (opModeIsActive() && !isStopRequested()) {
@@ -69,10 +81,10 @@ public class PurePursuitTuner extends LinearOpMode {
 //            bot.purePursuit.kSQy = kSQy;
 //            bot.purePursuit.kF = kF;
 //            bot.purePursuit.hPID = new PIDCoefficients(hP, hI, hD);
-//            Actions.runBlocking(bot.followPath(spline));
-//            Actions.runBlocking(bot.followPathReversed(spline.reverse()));
+//            Actions.runBlocking(bot.followPath(l_spline));
+//            Actions.runBlocking(bot.followPathReversed(l_spline.reverse()));
 //        }
-        Actions.runBlocking(bot.followPath(spline));
+        Actions.runBlocking(bot.followPath(l_spline));
         bot.purePursuit.mecDrive.setPowers(0, 0, 0, 0);
         Pose finalPose = bot.purePursuit.pose;
         telemetry.addData("FinalX", finalPose.x);

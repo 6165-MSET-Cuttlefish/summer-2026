@@ -6,6 +6,7 @@ import com.acmerobotics.dashboard.telemetry.MultipleTelemetry;
 import com.acmerobotics.roadrunner.ftc.Actions;
 import com.pedropathing.follower.Follower;
 import com.pedropathing.geometry.BezierCurve;
+import com.pedropathing.geometry.BezierLine;
 import com.pedropathing.geometry.Pose;
 import com.pedropathing.paths.PathChain;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
@@ -40,6 +41,14 @@ public class PedroTest extends LinearOpMode {
                         new Pose(36, 36)))
                 .setTangentHeadingInterpolation().build();
 
+        PathChain line = follower.pathBuilder().addPath(
+                        new BezierLine(new Pose(0,0), new Pose(86, 0)))
+                .setTangentHeadingInterpolation().build();
+        PathChain line2 = follower.pathBuilder().addPath(
+                        new BezierLine(new Pose(86,0), new Pose(0, 0)))
+                .setTangentHeadingInterpolation().setReversed().build();
+
+
         PathChain spline2 = follower.pathBuilder().addPath(
                 new BezierCurve(new Pose(36,36),
                         new Pose(0, 36),
@@ -47,6 +56,19 @@ public class PedroTest extends LinearOpMode {
                         new Pose(0, 0)))
                 .setTangentHeadingInterpolation().setReversed().build();
 
+        PathChain l_spline = follower.pathBuilder().addPath(
+                        new BezierCurve(new Pose(0,0),
+                                new Pose(48, -6),
+                                new Pose(60, 6),
+                                new Pose(60, 40)))
+                .setTangentHeadingInterpolation().build();
+
+        PathChain l_spline2 = follower.pathBuilder().addPath(
+                        new BezierCurve(new Pose(60,40),
+                                new Pose(60, 6),
+                                new Pose(48, -6),
+                                new Pose(0, 0)))
+                .setTangentHeadingInterpolation().setReversed().build();
 
         waitForStart();
 
@@ -56,14 +78,14 @@ public class PedroTest extends LinearOpMode {
 //            switch (asdf) {
 //                case 0: {
 //                    if (!follower.isBusy()) {
-//                        follower.followPath(spline);
+//                        follower.followPath(l_spline);
 //                        asdf = 1;
 //                    }
 //                    break;
 //                }
 //                case 1: {
 //                    if (!follower.isBusy()) {
-//                        follower.followPath(spline2);
+//                        follower.followPath(l_spline2);
 //                        asdf = 0;
 //                    }
 //                    break;
@@ -72,7 +94,7 @@ public class PedroTest extends LinearOpMode {
 //
 //        }
 
-        follower.followPath(spline);
+        follower.followPath(l_spline);
 
         while (follower.isBusy()) {
             follower.update();

@@ -472,12 +472,11 @@ data class Bezier(val controlPoints: MutableList<Vector>): ParameterizedObject, 
 fun main() {
     val x = PurePursuit.builder
         .addControlPoint(0.0,0.0)
-        .addControlPoint(6.0,2.0)
-        .addControlPoint(-10.0, 5.0)
-        .addControlPoint(3.0, -4.0)
-        .addControlPoint(5.0,7.0)
+        .addControlPoint(48.0,-6.0)
+        .addControlPoint(60.0, 6.0)
+        .addControlPoint(60.0, 40.0)
         .build()
-    println(x.solve(0.5))
+    println(x.bezierCurveDerivative(1.0))
 }
 
 
