@@ -8,19 +8,14 @@ import java.util.function.Supplier;
 import org.firstinspires.ftc.teamcode.architecture.core.Module;
 import org.firstinspires.ftc.teamcode.architecture.core.State;
 
-/**
- * Single-threaded cooperative scheduler; {@link #update} ticks every active action once.
- * EnhancedOpMode pumps between gameLoop() and writeModules() on the OpMode thread.
- */
+/** Single-threaded cooperative scheduler; EnhancedOpMode must pump {@link #update} between gameLoop() and writeModules(). */
 public final class Actions {
     private Actions() {}
 
     private static final ArrayList<Action> active = new ArrayList<>();
 
-    // Reentrancy guard: update() iterates `active` by index while ticking, and a Step's
-    // start()/tick() may call schedule()/cancelFor()/cancelAll() reentrantly. Mutating `active`
-    // mid-iteration would skip or double-visit actions, so during update() those calls are queued
-    // here and applied once iteration finishes.
+    // Reentrancy guard: a Step may schedule/cancel while update() iterates `active` by index, so
+    // those mutations are queued here and applied after iteration.
     private static boolean updating = false;
     private static final ArrayList<Runnable> deferredOps = new ArrayList<>();
 
@@ -127,7 +122,7 @@ public final class Actions {
                 i++;
             }
         }
-        // Re-schedule case: drop any stale entry for this action.
+        // Re-schedule case: drop any stale entry (the conflict loop above misses targetless actions).
         active.remove(action);
         action.reset();
         active.add(action);
@@ -146,8 +141,6 @@ public final class Actions {
             int i = 0;
             while (i < active.size()) {
                 Action a = active.get(i);
-                // A throwing step propagates out by design (fail-fast); the finally still clears
-                // the reentrancy guard so a crashed tick can't wedge the scheduler.
                 if (a.tick()) {
                     // Tick may have already removed us (self-conflicting schedule from within tick).
                     if (i < active.size() && active.get(i) == a) {
@@ -158,6 +151,7 @@ public final class Actions {
                 }
             }
         } finally {
+            // A throwing step propagates by design; the guard must still clear or the scheduler wedges.
             updating = false;
         }
         drainDeferredOps();

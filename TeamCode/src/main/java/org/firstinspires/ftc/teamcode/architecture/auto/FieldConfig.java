@@ -7,6 +7,5 @@ import com.acmerobotics.dashboard.config.Config;
 public final class FieldConfig {
     private FieldConfig() {}
 
-    /** FTC fields are 141.5" on a side. */
     public static double fieldWidthInches = 141.5;
 }

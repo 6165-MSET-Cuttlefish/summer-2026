@@ -195,10 +195,6 @@ public class Drivetrain extends Module {
     }
 
     private double computeCurrentLimiterMultiplier(boolean emitTelemetry) {
-//        if (!currentLimiterConfig.enabled) {
-//            return 1.0;
-//        }
-
         double current = getFloodgateCurrent();
         currentLimiterConfig.currentOverTime += Math.pow(current, 2) * currentLoopTimer.milliseconds();
         currentLimiterConfig.currentOverTime *= Math.pow(currentLimiterConfig.decayRate, (currentLoopTimer.milliseconds() / currentLimiterConfig.decayLoopMs));
@@ -208,17 +204,13 @@ public class Drivetrain extends Module {
         }
 
 
-        if (current <= currentLimiterConfig.currentThresholdMin) { //25
+        if (current <= currentLimiterConfig.currentThresholdMin) {
             return 1.0;
         }
-//        if (current >= currentLimiterConfig.currentThresholdMax) { //30
-//            return 0.0;
-//        }
         double range = currentLimiterConfig.currentThresholdMax - currentLimiterConfig.currentThresholdMin;
         double excess = current - currentLimiterConfig.currentThresholdMin;
-//        return 1.0 - (excess / range);
 
-        //theoretical integral current scaling. used 400000 because theoretically (I^2 * t) shouldn't exceed that
+        // Integral (I²·t) scaling rather than a hard cutoff; integratedCurrentLimit is the ceiling I²·t shouldn't exceed.
         return 1.0 - Range.clip(currentLimiterConfig.currentOverTime / currentLimiterConfig.integratedCurrentLimit, 0, 1);
 
 
@@ -310,10 +302,6 @@ public class Drivetrain extends Module {
             logDashboard("Drive Mode", getState(DriveState.class));
             logDashboard("Motor Powers", "FL:%.2f BL:%.2f FR:%.2f BR:%.2f", flPower, blPower, frPower, brPower);
 
-            logDashboard("FL Power", "%.3f", fl.getPower());
-            logDashboard("BL Power", "%.3f", bl.getPower());
-            logDashboard("BR Power", "%.3f", br.getPower());
-            logDashboard("FR Power", "%.3f", fr.getPower());
             logDashboard("FL Position (ticks)", fl.getCurrentPosition());
             logDashboard("FR Position (ticks)", fr.getCurrentPosition());
             logDashboard("FL Velocity (RPM)", "%.1f", fl.getVelocity() * ENCODER_TO_RPM);

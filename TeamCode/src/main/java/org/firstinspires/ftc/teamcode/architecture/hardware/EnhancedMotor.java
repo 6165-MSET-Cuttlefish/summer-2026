@@ -9,10 +9,7 @@ import com.qualcomm.robotcore.hardware.configuration.typecontainers.MotorConfigu
 import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.CurrentUnit;
 
-/**
- * DcMotorEx wrapper with last-power caching, clamp bounds, and optional voltage compensation.
- * E.g. {@code new EnhancedMotor(map, "name").withCachingTolerance(0.02).withVoltageCompensation(13.5)}.
- */
+/** DcMotorEx wrapper with last-power caching, clamp bounds, and optional voltage compensation. */
 public class EnhancedMotor implements DcMotorEx {
     private final DcMotorEx motor;
     private final WriteCache cache = new WriteCache();
@@ -37,7 +34,6 @@ public class EnhancedMotor implements DcMotorEx {
         return this;
     }
 
-    /** {@code referenceVoltage} = nominal pack voltage (typically 13.5V). */
     public EnhancedMotor withVoltageCompensation(double referenceVoltage) {
         cache.voltageCompensationEnabled = true;
         cache.referenceVoltage = referenceVoltage;
@@ -57,15 +53,13 @@ public class EnhancedMotor implements DcMotorEx {
         double corrected = cache.clamp(cache.applyVoltageScaling(power));
         if (cache.shouldWrite(corrected)) {
             cache.store(corrected);
-            // A power write switches the motor out of velocity mode. Invalidate the velocity cache
-            // so a later setVelocity() with the same numeric rate re-issues instead of being
-            // suppressed while the hardware is actually holding a power. Mirrors setDirection().
+            // Power write leaves velocity mode; drop the velocity cache or an identical setVelocity() is wrongly suppressed.
             cachedVelocity = Double.NaN;
             motor.setPower(corrected);
         }
     }
 
-    /** Bypass voltage compensation and the write cache. Test-only. */
+    /** Bypasses voltage compensation and the write cache. Test-only. */
     public void setPowerRaw(double power) {
         double corrected = cache.clamp(power);
         cache.store(corrected);
@@ -89,11 +83,7 @@ public class EnhancedMotor implements DcMotorEx {
         return cache.voltageCompensationEnabled;
     }
 
-    /**
-     * Raw device for reads or SDK calls this wrapper doesn't proxy. Writing power/velocity
-     * directly through it bypasses the write cache and leaves it stale — prefer this wrapper's
-     * setters, or {@link #setPowerRaw(double)} which keeps the cache in sync.
-     */
+    /** Raw device; writing power/velocity through it bypasses the write cache and leaves it stale. */
     public DcMotorEx getUnderlying() { return motor; }
     public double getCachedPower() { return cache.cached; }
 
@@ -105,8 +95,7 @@ public class EnhancedMotor implements DcMotorEx {
     public void setVelocity(double angularRate) {
         if (angularRate == cachedVelocity) return;
         cachedVelocity = angularRate;
-        // A velocity write switches the motor out of power mode. Invalidate the power cache so a
-        // later setPower() with the same numeric power re-issues instead of being suppressed.
+        // Velocity write leaves power mode; drop the power cache or an identical setPower() is wrongly suppressed.
         cache.store(Double.NaN);
         motor.setVelocity(angularRate);
     }
@@ -156,8 +145,7 @@ public class EnhancedMotor implements DcMotorEx {
     @Override public Direction getDirection() { return motor.getDirection(); }
     @Override public void setDirection(Direction direction) {
         motor.setDirection(direction);
-        // A direction flip changes what the same numeric power/velocity does, but not the number
-        // itself. Drop the caches so the next setPower/setVelocity always re-issues to hardware.
+        // Direction changes what the same number means, not the number; drop both caches to force a re-issue.
         cache.store(Double.NaN);
         cachedVelocity = Double.NaN;
     }

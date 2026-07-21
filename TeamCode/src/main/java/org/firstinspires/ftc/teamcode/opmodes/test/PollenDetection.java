@@ -9,25 +9,15 @@ import org.firstinspires.ftc.teamcode.OpenCVPipelines.WebcamControls;
 import org.firstinspires.ftc.teamcode.OpenCVPipelines.WebcamSession;
 
 /**
- * Runs the Pollen detection pipeline on the Control Hub — the on-robot equivalent of selecting the
- * pipeline in EOCV-Sim. Opens the webcam (MJPEG), streams the pipeline output to FtcDashboard, and
- * applies the live {@link WebcamControls} exposure/gain/WB sliders.
- *
- * <p>Everything is tunable from FtcDashboard while it runs:
- * <ul>
- *   <li>camera — {@code WebcamControls.*} (exposure / gain / white balance, manual on/off)</li>
- *   <li>detection — {@code PollenDetectionPipeline.Tuning.*} (HSV gate, minPeakDist, and the
- *       MASK/OVERLAY {@code displayMode} dropdown)</li>
- * </ul>
- *
- * <p>The pipeline owns telemetry (it prints calibration status / detections each frame), so this
- * OpMode's loop only pumps the camera controls.
+ * Runs the Pollen detection pipeline on the robot — the on-robot equivalent of selecting the pipeline
+ * in EOCV-Sim. {@code WebcamControls.*} and {@code PollenDetectionPipeline.Tuning.*} are live on
+ * FtcDashboard while it runs.
  */
 @TeleOp(name = "Pollen Detection", group = "test")
 @Config
 public class PollenDetection extends LinearOpMode {
 
-    // Matches the webcam name in camera.xml / decode.xml (the Arducam UC-852 / OV9782).
+    // Must match the webcam name in camera.xml / decode.xml (the Arducam UC-852 / OV9782).
     private static final String WEBCAM_NAME = "nerdDetector";
 
     private WebcamSession session;

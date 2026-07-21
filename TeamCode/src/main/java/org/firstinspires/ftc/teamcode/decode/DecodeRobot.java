@@ -17,15 +17,9 @@ import static org.firstinspires.ftc.teamcode.decode.DecodeContext.blueTargetPose
 import static org.firstinspires.ftc.teamcode.decode.DecodeContext.redApriltagPose;
 import static org.firstinspires.ftc.teamcode.decode.DecodeContext.redTargetPose;
 
-/**
- * The 2025-26 FTC Decode robot: drivetrain + shooter + magazine + turret + endgame, plus the
- * {@link RobotActions} composed-action library. Lives entirely in this file; bumping seasons
- * means swapping this class for a new one without touching {@link Robot} or any framework code.
- */
 @Config
 public class DecodeRobot extends Robot {
 
-    /** Game-side static so Decode modules can reach sibling modules / target poses. */
     public static DecodeRobot robot;
 
     public Pose targetPose;
@@ -53,7 +47,7 @@ public class DecodeRobot extends Robot {
 
     @Override
     protected void initializeGameModules() {
-        // Assigned before module constructors run: some modules (Magazine etc.) read DecodeRobot.robot.
+        // Must precede the module constructors: some modules (Magazine etc.) read DecodeRobot.robot.
         robot = this;
         setTargetPosesForAlliance();
         drivetrain = new Drivetrain(opMode.hardwareMap);
@@ -85,9 +79,7 @@ public class DecodeRobot extends Robot {
         }
     }
 
-    /** Push the latest dashboard WriteToggles state into module flags; called each loop. */
     public void updateWriteToggles() {
-        // DS/dashboard enable flags are wired by EnhancedOpMode from Robot.telemetryToggles now.
         boolean robotWriteEnabled = writeToggles.robotWrite;
 
         drivetrain.setWriteEnabled(robotWriteEnabled && writeToggles.drivetrainWrite);

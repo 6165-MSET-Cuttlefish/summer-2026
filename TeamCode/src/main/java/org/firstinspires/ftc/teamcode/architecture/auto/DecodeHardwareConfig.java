@@ -5,15 +5,6 @@ import com.qualcomm.robotcore.hardware.DcMotorSimple;
 
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 
-/**
- * Hardware wiring for the <strong>DECODE robot</strong>: motor names/directions + Pinpoint pod
- * offsets, ported from the DECODE repo's {@code architecture/auto/Constants.java}. Tuning lives in
- * {@link DecodePedroSetup}. {@link PedroSetup#activeRobot} selects between this and
- * {@link BettaHardwareConfig}; DECODE OpModes pin it via {@code DecodeOpMode.createRobot()}.
- *
- * <p>Differs from the betta bot in the strafe-pod encoder direction (DECODE = REVERSED).
- * Values marked "measured 2/17" came from the DECODE robot; re-measure if the odometry moves.
- */
 public final class DecodeHardwareConfig {
     private DecodeHardwareConfig() {}
 
@@ -29,9 +20,9 @@ public final class DecodeHardwareConfig {
 
     public static final String PINPOINT_NAME = "pinpoint";
 
-    /** Y-offset of the forward (parallel) pod from robot center, inches. Measured 2/17 on DECODE. */
+    /** Forward (parallel) pod offset from robot center, inches. */
     public static final double PINPOINT_FORWARD_POD_Y = -5.5;
-    /** X-offset of the strafe (perpendicular) pod from robot center, inches. Measured 2/17 on DECODE. */
+    /** Strafe (perpendicular) pod offset from robot center, inches. */
     public static final double PINPOINT_STRAFE_POD_X = 1.0;
 
     public static final DistanceUnit PINPOINT_DISTANCE_UNIT = DistanceUnit.INCH;
@@ -41,7 +32,7 @@ public final class DecodeHardwareConfig {
 
     public static final GoBildaPinpointDriver.EncoderDirection PINPOINT_FORWARD_DIR =
             GoBildaPinpointDriver.EncoderDirection.REVERSED;
-    // DECODE strafe pod is REVERSED (the betta bot's is FORWARD) — a real per-robot difference.
+    // Genuinely REVERSED on DECODE where the betta bot is FORWARD — not a copy-paste slip.
     public static final GoBildaPinpointDriver.EncoderDirection PINPOINT_STRAFE_DIR =
             GoBildaPinpointDriver.EncoderDirection.REVERSED;
 }

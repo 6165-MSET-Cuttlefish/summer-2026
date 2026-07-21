@@ -27,10 +27,7 @@ public final class LoopProfiler {
         markAnchorNs = now;
     }
 
-    /**
-     * Reentrant scope timer. Returns 0 when disabled. <b>Tokens are single-use</b> — re-leaving
-     * with the same token double-counts the elapsed time.
-     */
+    /** Tokens are single-use — leaving twice with the same token double-counts the elapsed time. */
     public long enterSection() {
         return enabled ? System.nanoTime() : 0L;
     }

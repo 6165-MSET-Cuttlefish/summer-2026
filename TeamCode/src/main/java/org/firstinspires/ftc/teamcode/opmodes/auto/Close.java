@@ -16,10 +16,8 @@ import org.firstinspires.ftc.teamcode.decode.DecodeAuto;
 import org.firstinspires.ftc.teamcode.modules.Magazine;
 import org.firstinspires.ftc.teamcode.modules.Shooter;
 
-// Not @Autonomous: this is the shared base for CloseRed/CloseBlue (the registered entry points).
-// Annotating it would register a redundant RED-pinned "Close" and let a BLUE driver pick an
-// alliance-neutral-looking auto that silently runs the RED (mirrored) sequence. @Config is kept so
-// its tuning statics surface once on the dashboard; the subclasses inherit them.
+// Deliberately not @Autonomous: CloseRed/CloseBlue are the entry points, and annotating this base
+// would register a duplicate RED auto that looks alliance-neutral to a BLUE driver.
 @Config
 public class Close extends DecodeAuto {
     public static boolean sorting = false;
@@ -32,7 +30,7 @@ public class Close extends DecodeAuto {
 
     private int intakeDelay = 2000;
     private int shootDelay = 600;
-    public static double shootPreDistanceCycles = 14; // used to be 20, going for consistency
+    public static double shootPreDistanceCycles = 14;
 
     private final double offsetStartPoseX = 0;
     private final double offsetStartPoseY = 0;
@@ -40,18 +38,13 @@ public class Close extends DecodeAuto {
     public static double REDrpmCycleOffset = -30;
     public static double BLUErpmCycleOffset = -100;
 
-    /**
-     * Alliance this auto pins before {@link org.firstinspires.ftc.teamcode.decode.DecodeRobot} builds
-     * its target poses. DECODE selected alliance with a separate ContextRed/ContextBlue OpMode run
-     * ahead of the auto; the summer fold pins it here instead. Overridden by {@link CloseRed} /
-     * {@link CloseBlue}; plain Close defaults to RED.
-     */
+    /** Alliance pinned before the mirrored poses and {@code createRobot()} build; overridden by {@link CloseRed} / {@link CloseBlue}. */
     protected AllianceColor alliance() {
         return AllianceColor.RED;
     }
 
-    // Runs after super() but before the mirrored Pose fields below, so forAlliance() and the later
-    // createRobot()/setTargetPosesForAlliance() both observe the right alliance.
+    // Must run before the mirrored Pose fields below, so forAlliance() and the later
+    // createRobot()/setTargetPosesForAlliance() all observe the same alliance.
     {
         Context.allianceColor = alliance();
     }
@@ -127,7 +120,7 @@ public class Close extends DecodeAuto {
                 .run(() -> robot.turret.lock(preloadScorePose))
                 .run(() ->
                         Actions.builder()
-                                .delay(sorting? 150 : 0) // needs tuning for sorting
+                                .delay(sorting? 150 : 0)
                                 .set(Shooter.FlywheelState.CLOSE_AUTO_PRELOAD)
                                 .waitUntil(() -> robot.shooter.getCurrentVelocityRPM() > 1000)
                                 .run(() -> robot.actions.shootAll(true, false).schedule())
@@ -183,8 +176,6 @@ public class Close extends DecodeAuto {
 
         builder
                 .run(() -> robot.turret.lock(score2RowPose))
-//                .run(() -> robot.turret.unlock())
-
                 .run(() -> robot.follower.setMaxPower(1))
                 .buildPath(path -> {
                     path.addLine(score2RowPose);

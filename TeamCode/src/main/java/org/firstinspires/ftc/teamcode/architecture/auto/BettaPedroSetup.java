@@ -11,20 +11,13 @@ import com.pedropathing.ftc.localization.constants.PinpointConstants;
 import com.pedropathing.paths.PathConstraints;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 
-/**
- * Pedro Pathing tuning + follower factory for the <strong>betta bot</strong>. Hardware names +
- * offsets live in {@link BettaHardwareConfig}. Selected via {@link PedroSetup#activeRobot}; the
- * DECODE robot's equivalent is {@link DecodePedroSetup}.
- *
- * <p>Public statics are non-final so they appear as live-tunable on FTC Dashboard.
- */
+/** Betta bot Pedro tuning; public statics are non-final so FTC Dashboard sees them as live-tunable. */
 @Config
 public final class BettaPedroSetup {
     private BettaPedroSetup() {}
 
-    // Pedro 2.1.2 defaults. Predictive braking is enabled (predictiveBrakingCoefficients(...)
-    // flips usePredictiveBraking=true), so translational/drive PIDF and zero-power-accel
-    // constants are NOT consulted — the predictive controller drives both inner loops.
+    // predictiveBrakingCoefficients(...) flips usePredictiveBraking=true, so translational/drive PIDF
+    // and zero-power-accel constants are never consulted.
     public static FollowerConstants followerConstants =
             new FollowerConstants()
                     .headingPIDFCoefficients(new PIDFCoefficients(1, 0, 0, 0.01))
@@ -33,7 +26,6 @@ public final class BettaPedroSetup {
                             new PredictiveBrakingCoefficients(0.15, 0.1, 0.001))
                     .centripetalScaling(0.0005);
 
-    // xVelocity/yVelocity are measured betta-bot forward + strafe full-power free-run speed (in/s).
     public static MecanumConstants driveConstants =
             new MecanumConstants()
                     .maxPower(1.0)

@@ -12,24 +12,15 @@ import org.firstinspires.ftc.teamcode.architecture.core.Robot;
 import org.firstinspires.ftc.teamcode.architecture.action.Actions;
 
 /**
- * End-to-end smoke test for the summer-2026 framework. One run exercises: the EnhancedOpMode
- * init/loop lifecycle, Robot + Module + State, the cooperative Action scheduler, the path-action
- * scheduler, the Pedro follower, and dual (DS + dashboard) telemetry.
- *
- * <p><strong>Drivetrain motion is OFF by default</strong> ({@code Tuning.enableDrive}). With it off
- * the auto actuates nothing by default — it steps the scheduler, flips a mock state, runs timed
- * actions, and reads odometry — so the architecture can be verified safely. To also prove a
- * hardware write, set {@code MockMechanism.pulseMotorName} on FtcDashboard to a motor name and it
- * pulses while the sequence runs. Turn {@code enableDrive} on only after confirming motor +
- * odometry directions, ideally wheels-off-ground first: the Pedro constants here are framework
- * defaults, not tuned for this robot.
+ * End-to-end smoke test for the framework: lifecycle, Robot/Module/State, both schedulers, telemetry.
+ * Enable {@code Tuning.enableDrive} only with wheels off the ground and motor + odometry directions
+ * confirmed — the Pedro constants here are framework defaults, not tuned for this robot.
  */
 @Autonomous(name = "Mock Architecture Test", group = "test")
 public class MockAuto extends EnhancedOpMode {
 
     @Config
     public static class Tuning {
-        /** Commanded drivetrain motion. Leave false for a no-motion plumbing test. */
         public static boolean enableDrive = false;
         public static double driveInches = 24;
         public static int safetyTimeoutMs = 15000;

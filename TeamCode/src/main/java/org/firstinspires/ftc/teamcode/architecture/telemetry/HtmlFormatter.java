@@ -1,6 +1,5 @@
 package org.firstinspires.ftc.teamcode.architecture.telemetry;
 
-/** HTML wrapping helpers for Driver Station telemetry. Static-imported at call sites. */
 public final class HtmlFormatter {
     private HtmlFormatter() {}
 
@@ -13,7 +12,7 @@ public final class HtmlFormatter {
     public static final String COLOR_BLUE   = "#448aff";
     public static final String COLOR_GRAY   = "#9e9e9e";
 
-    // Count of <big>/<small> wraps htmlSize applies. Positive = bigger, negative = smaller.
+    // Count of <big>/<small> wraps htmlSize applies, not a point size.
     public static final int FONT_SMALL   = -1;
     public static final int FONT_NORMAL  = 0;
     public static final int FONT_LARGE   = 1;
@@ -24,10 +23,7 @@ public final class HtmlFormatter {
         return "<b>" + text + "</b>";
     }
 
-    /**
-     * Escape HTML-meaningful characters in a leaf string. The {@code html*()} primitives don't
-     * escape — callers must escape user-supplied content. Returns input unchanged if clean.
-     */
+    /** The {@code html*()} primitives don't escape — callers must escape user-supplied content. */
     public static String htmlEscape(String text) {
         if (text == null) return "";
         if (text.indexOf('&') < 0 && text.indexOf('<') < 0
@@ -52,7 +48,6 @@ public final class HtmlFormatter {
         return "<font color='" + hex + "'>" + text + "</font>";
     }
 
-    /** Positive sizes nest {@code <big>}; negative nest {@code <small>}; 0 returns input. */
     public static String htmlSize(int size, String text) {
         if (size == 0) return text;
         StringBuilder out = new StringBuilder(text.length() + 16);

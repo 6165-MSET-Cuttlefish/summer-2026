@@ -7,16 +7,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Builds piecewise {@link HeadingInterpolator}s, tracking the running t so chained segments
- * don't have to repeat their start-t.
- *
- * <pre>{@code
- * new HeadingInterpolatorBuilder()
- *     .linear(0, .2, startHeading, midHeading)
- *     .constant(.6, midHeading)
- *     .linear(1, midHeading, endHeading)
- *     .build();
- * }</pre>
+ * Builds piecewise {@link HeadingInterpolator}s, tracking the running t so chained segments don't
+ * have to repeat their start-t.
  */
 public class HeadingInterpolatorBuilder {
     private final List<HeadingInterpolator.PiecewiseNode> nodes = new ArrayList<>();
@@ -96,8 +88,8 @@ public class HeadingInterpolatorBuilder {
         if (nodes.isEmpty()) {
             throw new IllegalStateException("HeadingInterpolatorBuilder: no segments added");
         }
-        // Pedro accepts overlapping/backwards ranges silently. Reject those here so misuse of
-        // the auto-chained overloads doesn't produce a confusing interpolator.
+        // Pedro accepts overlapping/backwards t ranges silently; reject them rather than hand back
+        // a confusing interpolator.
         for (int i = 0; i < nodes.size(); i++) {
             HeadingInterpolator.PiecewiseNode n = nodes.get(i);
             if (n.getFinalTValue() <= n.getInitialTValue()) {

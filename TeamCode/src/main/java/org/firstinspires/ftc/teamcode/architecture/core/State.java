@@ -7,11 +7,9 @@ import org.firstinspires.ftc.teamcode.architecture.action.Action;
 import org.firstinspires.ftc.teamcode.architecture.action.Actions;
 
 /**
- * Marker interface for state-machine states. Implement on an enum, set the numeric setpoint
- * (servo position, motor power, RPM) via {@link #setValue(double)} in the constructor.
+ * State-machine state. Implement on an enum and set the setpoint via {@link #setValue(double)} in the constructor.
  *
- * <p>Backing maps are static so values persist across OpMode reconstruction (Sloth hot-reload,
- * repeated re-runs). {@link #clearModuleBindings()} drops stale State→Module pointers at init.
+ * <p>Backing maps are static so values survive OpMode reconstruction (Sloth hot-reload, re-runs); {@link #clearModuleBindings()} drops stale State→Module pointers at init.
  */
 public interface State {
 
@@ -24,7 +22,8 @@ public interface State {
     }
 
     default double getValue() {
-        return VALUES.getOrDefault(this, 0.0);
+        Double v = VALUES.get(this);
+        return v == null ? 0.0 : v;
     }
 
     default void setValue(double value) {

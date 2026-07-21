@@ -2,15 +2,7 @@ package org.firstinspires.ftc.teamcode.architecture.control;
 
 import com.qualcomm.robotcore.util.ElapsedTime;
 
-/**
- * WPILib-shaped PID controller with feed-forward + static-friction terms. {@link #calculate()}
- * sums {@code kP·error + kI·integral + kD·errorDot + kPosition·target + kV·targetVelocity +
- * kS·signum(error)} and clamps to {@link #outputMin}/{@link #outputMax}. Integrator is anti-
- * windup-clamped at {@link #integralMax} and frozen inside {@link #staticDeadband} so it
- * doesn't drift while the static-kick is suppressed near setpoint.
- *
- * <p>Fields are public for live {@code @Config} tuning.
- */
+/** PID with feed-forward (kV, kPosition) and a static-friction kick. Fields are public for live {@code @Config} tuning. */
 public class PidController {
     public double kP = 0, kI = 0, kD = 0;
 
@@ -51,9 +43,7 @@ public class PidController {
         timer = new ElapsedTime();
     }
 
-    /**
-     * Wrap error to take the shortest path across a continuous range (e.g. heading in [-π, π]).
-     */
+    /** Wrap error to take the shortest path across a continuous range (e.g. heading in [-π, π]). */
     public void enableContinuousInput(double minInput, double maxInput) {
         if (maxInput <= minInput) {
             throw new IllegalArgumentException("maxInput must be > minInput");
@@ -83,13 +73,12 @@ public class PidController {
     public void setTargetVelocity(double velocity) { this.targetVelocity = velocity; }
     public double getTargetVelocity() { return targetVelocity; }
 
-    /** WPILib-style: update with the new measurement and return the clamped output in one call. */
     public double calculate(double measurement) {
         updatePosition(measurement);
         return calculate();
     }
 
-    /** Return the clamped output using the current state. Call {@link #updatePosition} first. */
+    /** Uses the current state — call {@link #updatePosition} first. */
     public double calculate() {
         double proportional = error * kP;
         double integral     = integralSum * kI;
@@ -118,15 +107,11 @@ public class PidController {
         }
 
         if (deltaTimeSeconds > 0) {
+            // Both deltas must go through wrapError: unwrapped, a continuous-input controller sees a
+            // ~range jump at the wrap boundary and spikes D. No-op when continuous is disabled.
             if (derivativeOnMeasurement) {
-                // wrapError the measurement delta too: without it a continuous-input controller
-                // (e.g. heading in [-π, π]) sees a ~2π jump at the wrap boundary and spikes D.
                 errorDerivative = -wrapError(position - previousPosition) / deltaTimeSeconds;
             } else {
-                // wrapError the error delta too: with continuous input, error and previousError are
-                // each wrapped into [-range/2, range/2), so a measurement crossing the wrap boundary
-                // makes their raw difference ~±range and spikes D. wrapError is a no-op when
-                // continuous is disabled, so the linear case is unaffected.
                 errorDerivative = wrapError(error - previousError) / deltaTimeSeconds;
             }
         } else {
@@ -234,7 +219,7 @@ public class PidController {
         if (!continuous) return e;
         double range = maxInput - minInput;
         double halfRange = range / 2.0;
-        // Shift into [-halfRange, halfRange).
+        // Double-mod shifts into [-halfRange, halfRange) despite Java's signed %.
         return ((e + halfRange) % range + range) % range - halfRange;
     }
 }

@@ -19,8 +19,8 @@ import org.firstinspires.ftc.teamcode.architecture.core.Module;
 import org.firstinspires.ftc.teamcode.architecture.core.State;
 
 /**
- * Builds an autonomous sequence of paths, actions, and waits. Queued setState/run/actionDuring
- * calls accumulate into the next real segment's prelude — zero extra scheduler ticks.
+ * Queued setState/run/actionDuring calls accumulate into the next real segment's prelude — zero
+ * extra scheduler ticks.
  */
 public class PathActionBuilder {
 
@@ -41,9 +41,8 @@ public class PathActionBuilder {
     private final LongSupplier gameClockMs;
 
     /**
-     * @param follower    the Pedro follower this sequence drives (required)
-     * @param gameClockMs match-elapsed time in ms, used by {@link #setTimeOverride}; typically
-     *                    {@code () -> (long) opMode.getGameTimer().milliseconds()}
+     * {@code gameClockMs} supplies match-elapsed ms for {@link #setTimeOverride}; typically
+     * {@code () -> (long) opMode.getGameTimer().milliseconds()}.
      */
     public PathActionBuilder(Follower follower, LongSupplier gameClockMs) {
         this.follower = Objects.requireNonNull(follower, "follower");
@@ -59,7 +58,6 @@ public class PathActionBuilder {
         return this;
     }
 
-    /** Gate subsequent segments without restructuring the chain. */
     public PathActionBuilder setEnabled(boolean enabled) {
         if (!enabled) lastSegmentDisabled = true;
         this.enabled = enabled;
@@ -92,8 +90,7 @@ public class PathActionBuilder {
                 .moduleStates(drainQueuedStates())
                 .enabled(enabled)
                 .build());
-        // Only advance the expected start pose if this segment will actually run; a disabled
-        // driveTo drives nowhere, so leaving nextSegmentStartPose put keeps the chain coherent.
+        // A disabled driveTo drives nowhere, so leaving the expected start pose put keeps the chain coherent.
         if (enabled) nextSegmentStartPose = targetPose;
         return this;
     }
@@ -118,9 +115,8 @@ public class PathActionBuilder {
         Pose safeStart = Objects.requireNonNull(
                 startPose, "startPose is required; call setStartPose() before buildPath");
 
-        // After a disabled segment, transit back if our expected start drifted. Clear the flag
-        // whether or not a transit was inserted, so a stale "disabled" can't fire a spurious
-        // transit many segments later.
+        // Clear the flag even when no transit was inserted, so a stale "disabled" can't fire a
+        // spurious transit many segments later.
         if (enabled && lastSegmentDisabled) {
             if (nextSegmentStartPose != null && !posesApproxEqual(safeStart, nextSegmentStartPose)) {
                 driveTo(safeStart);
@@ -141,7 +137,7 @@ public class PathActionBuilder {
 
     /**
      * Path resolved at execution time so the body sees live pose / sensors. {@code declaredEndPose}
-     * only seeds the next segment's default start; the resolved path uses live pose at execution.
+     * only seeds the next segment's default start; the resolved path uses live pose.
      */
     public PathActionBuilder buildPathDeferred(Pose declaredEndPose, Consumer<TrackingPathBuilder> body) {
         if (enabled) nextSegmentStartPose = declaredEndPose;
@@ -221,9 +217,8 @@ public class PathActionBuilder {
 
     @CheckResult
     public PathActionScheduler build() {
-        // Flush trailing queue items as a final no-op segment so they actually run. Force enabled:
-        // the gate flag suppresses PATH execution, but a disabled segment is skipped wholesale
-        // (prelude/states/during dropped), and this terminal segment carries no path to gate.
+        // Force enabled: a disabled segment is skipped wholesale (prelude/states/during dropped),
+        // and this trailing flush segment carries no path to gate.
         if (!queuedRunnables.isEmpty() || !queuedDuringActions.isEmpty() || !queuedStates.isEmpty()) {
             segments.add(new PathActionSegment.Builder()
                     .preludeRunnables(drainQueuedRunnables())

@@ -34,7 +34,7 @@ public class Tele extends DecodeOpMode {
     public static boolean soloDriver = false;
     private ActionLayer d1Layer = ActionLayer.TELE;
     private ActionLayer d2Layer = ActionLayer.TELE;
-    private double slowMultiplier = 1.0; // 1.0 = off, 0.5 = LB slow, 0.75 = LT slow
+    private double slowMultiplier = 1.0;
 
     private boolean lastIntakeBallDetected = false;
     private boolean lastPrismWarningActive = false;
@@ -45,8 +45,6 @@ public class Tele extends DecodeOpMode {
     private long lastGamepad1RumbleMs = 0;
     private long lastGamepad2RumbleMs = 0;
 
-    // Perf toggles relocated from Decode's framework OptimizationToggles, which summer's audit
-    // slimmed and no longer carries; kept here as opmode config so defaults/behavior match.
     public static boolean optimizeInputInvalidation = true;
     public static boolean optimizeControlsTelemetryCadence = false;
     public static int optimizeControlsTelemetryEveryNLoops = 1;
@@ -88,16 +86,10 @@ public class Tele extends DecodeOpMode {
     @Override
     public void initializeLoop() {
         updateInputs();
-
-//        robot.endgame.leftInitialEncoder.zero();
-//        robot.endgame.rightInitialEncoder.zero();
     }
 
     @Override
     public void onStart() {
-//        robot.endgame.leftInitialEncoder.zero();
-//        robot.endgame.rightInitialEncoder.zero();
-
         robot.drivetrain.getFl().setZeroPowerBehavior(DcMotorEx.ZeroPowerBehavior.BRAKE);
         robot.drivetrain.getFr().setZeroPowerBehavior(DcMotorEx.ZeroPowerBehavior.BRAKE);
         robot.drivetrain.getBl().setZeroPowerBehavior(DcMotorEx.ZeroPowerBehavior.BRAKE);
@@ -298,8 +290,7 @@ public class Tele extends DecodeOpMode {
         d2LsRight = d2.getLeftStickX().greaterThan(0.5);
         d2LsLeft = d2.getLeftStickX().lessThan(-0.5);
 
-        // Register these derived (threshold) suppliers so a layer switch primes them alongside the
-        // facade suppliers — otherwise they fire a spurious edge on the first ActionLayer change.
+        // Track derived threshold suppliers so a layer switch primes them; untracked they fire a spurious edge on the first switch.
         d1.track(d1Lt, d1Rt);
         d2.track(d2Lt, d2Rt, d2RsUp, d2RsDown, d2RsRight, d2RsLeft,
                 d2LsUp, d2LsDown, d2LsRight, d2LsLeft);
@@ -313,7 +304,6 @@ public class Tele extends DecodeOpMode {
         if (d1.RB().getValue()) {
             Magazine.VerticalState.HALF_DOWN.activate();
         } else if (d1Rt.wasJustPressed()) {
-//            robot.turret.snapshotAprilTagOffset();
             Magazine.HorizontalBackState backState = robot.magazine.getState(Magazine.HorizontalBackState.class);
             if (backState == Magazine.HorizontalBackState.OPEN) {
                 Magazine.HorizontalBackState.OPEN_SHOOT.activate();
@@ -360,7 +350,6 @@ public class Tele extends DecodeOpMode {
         }
 
         if (d1.LB().wasJustPressed()) {
-//            slowMultiplier = (slowMultiplier == 0.5) ? 1.0 : 0.5;
             if (soloDriver) {
                 Magazine.IntakeState.FORWARD.activate();
             } else {
@@ -401,9 +390,6 @@ public class Tele extends DecodeOpMode {
             if (d1.DPAD_DOWN().wasJustPressed()) {
                 resetPoseAndOffsets(new Pose(141.5 / 2, 141.5 - 8.875, Math.toRadians(90)));
             }
-//            if (d2.DPAD_LEFT().wasJustPressed()) {
-//                resetPoseAndOffsets(new Pose(130, 62.0, Math.toRadians(44.0)));
-//            }
         }
 
         boolean slowModeActive = slowMultiplier == 0.5 || slowMultiplier == 0.75;
@@ -569,13 +555,11 @@ public class Tele extends DecodeOpMode {
 
         if (d2Lt.wasJustPressed()) {
             if (!robot.magazine.getState(Magazine.IntakeState.class).equals(Magazine.IntakeState.ANALOG_EXTAKE)) {
-//                previousIntakeStateD2LT = robot.magazine.getState(Magazine.IntakeState.class);
             }
             Magazine.IntakeState.ANALOG_EXTAKE.setValue(-d2.LT().getValue());
             Magazine.IntakeState.ANALOG_EXTAKE.activate();
         }
         if (d2Lt.wasJustReleased()) {
-//            previousIntakeStateD2LT.activate();
             Magazine.IntakeState.IDLE.activate();
         }
 
@@ -604,12 +588,6 @@ public class Tele extends DecodeOpMode {
             rumbleGamepad2(150);
             return;
         }
-
-
-//        if (d2Rt.wasJustReleased()) {
-//            robot.magazine.updateMagazineColorState();
-//            robot.magazine.updateMagazinePrismLeds();
-//        }
     }
 
     private void sortLayer() {
@@ -663,7 +641,6 @@ public class Tele extends DecodeOpMode {
         if (d2.Y().wasJustPressed()) {
             Magazine.HorizontalFrontState.OPEN.activate();
             Magazine.HorizontalBackState.OPEN.activate();
-//            robot.actions.shootSorted().schedule();
         }
 
         if (d2.DPAD_UP().getValue()) {
@@ -687,7 +664,6 @@ public class Tele extends DecodeOpMode {
         robot.shooter.farHoodOffset = 0;
         robot.turret.turretAprilTagOffset = 0;
 
-        // Mirror turret offsets for BLUE alliance
         resetOffsets();
     }
 
@@ -704,7 +680,7 @@ public class Tele extends DecodeOpMode {
     private void relocalizeFromLimelight() {
         Pose relocalizedPose = robot.turret.getRelocalizedRobotPoseFromLimelight();
         if (relocalizedPose != null) {
-            // Only correct the pose — don't reset shooter/turret tuning offsets.
+            // Correct pose only — deliberately keeps the shooter/turret tuning offsets.
             robot.follower.setPose(new Pose(relocalizedPose.getX(), relocalizedPose.getY(), robot.follower.getHeading()));
             robot.turret.turretAprilTagOffset = 0;
             rumbleGamepad1(200);
@@ -734,22 +710,6 @@ public class Tele extends DecodeOpMode {
         if (d2.DPAD_RIGHT().wasJustPressed()) {
             Magazine.VerticalState.OFF.activate();
         }
-
-        /*
-        if (gamepad2.left_stick_y > 0.75) {
-            // Negative makes it go up
-            robot.endgame.leftPidflOffset -= 1;
-        } else if (gamepad2.left_stick_y < -0.75) {
-            robot.endgame.leftPidflOffset += 1;
-        }
-
-        if (gamepad2.right_stick_y > 0.75) {
-            // Negative makes it go up
-            robot.endgame.rightPidflOffset -= 1;
-        } else if (gamepad2.right_stick_y < -0.75) {
-            robot.endgame.rightPidflOffset += 1;
-        }
-        */
     }
 
     private void drive() {

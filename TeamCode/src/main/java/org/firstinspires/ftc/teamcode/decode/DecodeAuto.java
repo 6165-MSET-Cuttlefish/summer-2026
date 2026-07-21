@@ -23,10 +23,6 @@ public abstract class DecodeAuto extends DecodeOpMode {
     private boolean autonomousSequenceBuiltInInit = false;
     private int visualizationLoopCounter = 0;
 
-    /**
-     * DECODE-auto-only perf knobs. Kept local (not in framework {@code OptimizationToggles}, which the
-     * summer refactor trimmed) so this port unit stays self-contained; names preserved from Decode.
-     */
     @Config
     public static class AutoToggles {
         public static boolean optimizeBuildAutonomousSequenceOnceInInit = false;

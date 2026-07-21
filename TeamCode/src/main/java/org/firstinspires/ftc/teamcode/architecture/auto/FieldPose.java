@@ -5,9 +5,7 @@ import com.pedropathing.geometry.Pose;
 import org.firstinspires.ftc.teamcode.architecture.core.AllianceColor;
 import org.firstinspires.ftc.teamcode.architecture.core.Context;
 
-/**
- * Author path geometry for RED; these mirror to BLUE when {@link Context#allianceColor} flips.
- */
+/** Author path geometry for RED; these mirror to BLUE when {@link Context#allianceColor} flips. */
 public final class FieldPose {
     private FieldPose() {}
 

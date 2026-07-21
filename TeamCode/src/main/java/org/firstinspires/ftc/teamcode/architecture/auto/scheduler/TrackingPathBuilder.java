@@ -202,13 +202,10 @@ public class TrackingPathBuilder {
     }
 
     /**
-     * WARNING: per-path end-criteria constraints (t-value / timeout / and the {@link #setConstraints}
-     * family) do NOT survive Pedro's {@code build()}. {@code PathBuilder.build()} rebuilds the chain
-     * via {@code new PathChain(paths)}, whose constructor resets every path to
-     * {@code PathConstraints.defaultConstraints} (verified against Pedro 2.1.2, unchanged since 2.1.1).
-     * These calls compile but are silently ignored. To end a segment earlier use the scheduler's
-     * {@code holdAtDistance(...)} / {@code setMaxPower(...)}; to change the GLOBAL end criteria call
-     * {@code PathConstraints.setDefaultConstraints(...)} once before building.
+     * WARNING: silently a no-op — Pedro's {@code build()} rebuilds the chain and resets every path to
+     * {@code PathConstraints.defaultConstraints} (verified against 2.1.2). To end a segment earlier use
+     * the scheduler's {@code holdAtDistance(...)} / {@code setMaxPower(...)}; for the GLOBAL end criteria
+     * call {@code PathConstraints.setDefaultConstraints(...)} once before building.
      */
     public TrackingPathBuilder setTValueConstraint(double set) {
         pedroBuilder.setTValueConstraint(set);
@@ -236,8 +233,7 @@ public class TrackingPathBuilder {
         return this;
     }
 
-    /** See {@link #setTValueConstraint} — Pedro's build() resets per-path constraints, so this is a
-     *  no-op. Use holdAtDistance/setMaxPower, or PathConstraints.setDefaultConstraints for global. */
+    /** See {@link #setTValueConstraint} — no-op after build() (Pedro resets per-path constraints). */
     public TrackingPathBuilder setConstraints(PathConstraints constraints) {
         pedroBuilder.setConstraints(constraints);
         return this;
@@ -306,8 +302,6 @@ public class TrackingPathBuilder {
             try {
                 return condition.call();
             } catch (Exception e) {
-                // Adapt Callable's checked exception to the unchecked BooleanSupplier; propagate
-                // (fail-fast) rather than swallowing a throwing condition into a permanent "false".
                 throw new RuntimeException(e);
             }
         });
@@ -322,7 +316,6 @@ public class TrackingPathBuilder {
             try {
                 return condition.call();
             } catch (Exception e) {
-                // Propagate (fail-fast) instead of swallowing a throwing condition into "false".
                 throw new RuntimeException(e);
             }
         });
@@ -337,11 +330,9 @@ public class TrackingPathBuilder {
     }
 
     /**
-     * Advance the scheduler when the follower's whole-chain remaining distance
-     * ({@code getTotalDistanceRemaining()}) {@code <= distance}, letting Pedro finish the last inch
-     * on its own. Lets subsequent segments overlap final convergence. On a chain built with
-     * {@code setNoDeceleration()} Pedro reports total-remaining as -1; the scheduler falls back to
-     * current-leg {@code getDistanceRemaining()} in that case.
+     * Advance the scheduler once whole-chain remaining distance {@code <= distance}, letting Pedro
+     * finish the last inch while later segments overlap. A {@code setNoDeceleration()} chain reports
+     * total-remaining as -1; the scheduler falls back to current-leg {@code getDistanceRemaining()}.
      */
     public TrackingPathBuilder holdAtDistance(double distance) {
         this.holdAtDistance = distance;
