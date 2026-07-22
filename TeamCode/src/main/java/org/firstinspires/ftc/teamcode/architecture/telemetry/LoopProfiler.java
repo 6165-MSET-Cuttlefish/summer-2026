@@ -46,6 +46,24 @@ public final class LoopProfiler {
         return out;
     }
 
+    /** One compact, paste-friendly line: per-section lifetime avg/peak/count sorted by avg desc. */
+    public String report(long loops, double loopAvgMs, double loopMaxMs) {
+        List<Map.Entry<String, Bucket>> entries = new ArrayList<>(sections.entrySet());
+        Collections.sort(entries, (a, b) ->
+                Double.compare(b.getValue().lifetimeAvg(), a.getValue().lifetimeAvg()));
+        StringBuilder sb = new StringBuilder(640);
+        sb.append("loops=").append(loops)
+          .append(" loopAvg=").append(String.format("%.2f", loopAvgMs))
+          .append(" loopMax=").append(String.format("%.1f", loopMaxMs)).append("ms ||");
+        for (int i = 0; i < entries.size(); i++) {
+            Bucket b = entries.get(i).getValue();
+            sb.append(' ').append(entries.get(i).getKey()).append('=')
+              .append(String.format("%.2f", b.lifetimeAvg())).append('/')
+              .append(String.format("%.1f", b.peak)).append('/').append(b.count).append(';');
+        }
+        return sb.toString();
+    }
+
     public void reset() {
         sections.clear();
         markAnchorNs = 0L;
@@ -65,6 +83,10 @@ public final class LoopProfiler {
         int idx = 0;
         int filled = 0;
         double sum = 0;
+        // Lifetime (since reset) stats for the paste-back dump; the window above drives the live view.
+        long count = 0;
+        double total = 0;
+        double peak = 0;
 
         void add(double v) {
             sum -= window[idx];
@@ -72,10 +94,17 @@ public final class LoopProfiler {
             sum += v;
             idx = (idx + 1) % WINDOW;
             if (filled < WINDOW) filled++;
+            count++;
+            total += v;
+            if (v > peak) peak = v;
         }
 
         double avg() {
             return filled == 0 ? 0 : sum / filled;
+        }
+
+        double lifetimeAvg() {
+            return count == 0 ? 0 : total / count;
         }
     }
 }

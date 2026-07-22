@@ -4,7 +4,7 @@ import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
 
 import org.firstinspires.ftc.teamcode.architecture.core.AllianceColor;
 
-@Autonomous(name = "Close RED", group = "A")
+@Autonomous(name = "Close Red", group = "A")
 public class CloseRed extends Close {
     @Override
     protected AllianceColor alliance() {

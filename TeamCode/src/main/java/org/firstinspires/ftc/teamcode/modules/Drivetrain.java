@@ -51,8 +51,6 @@ public class Drivetrain extends Module {
     public static EnableMotors enableMotors = new EnableMotors();
     public static CurrentLimiterConfig currentLimiterConfig = new CurrentLimiterConfig();
     private ElapsedTime currentLoopTimer;
-    private int currentLimiterLoopCounter = 0;
-    private double cachedCurrentLimiterMultiplier = 1.0;
 
     private boolean headingLocked = false;
     private double lockedHeading = 0;
@@ -72,7 +70,6 @@ public class Drivetrain extends Module {
 
     private double flPower, blPower, brPower, frPower;
     private double lastCurrentLimiterMultiplier = 1.0;
-    private final double[] cachedMotorPowers = new double[4];
     public Drivetrain(HardwareMap hardwareMap) {
         super();
         setTelemetryEnabled(drivetrainTelemetry.TOGGLE);
@@ -93,8 +90,6 @@ public class Drivetrain extends Module {
     public void init(){
         super.init();
         currentLoopTimer = new ElapsedTime();
-        currentLimiterLoopCounter = 0;
-        cachedCurrentLimiterMultiplier = 1.0;
     }
     @Override
     protected void initStates() {
@@ -146,17 +141,10 @@ public class Drivetrain extends Module {
             br /= maxPower;
         }
 
-        if (!optimizeCurrentLimiterComputation) {
-            lastCurrentLimiterMultiplier = getCurrentLimiterMultiplier();
-            currentLoopTimer.reset();
-        } else {
-            int every = Math.max(1, optimizeCurrentLimiterEveryNLoops);
-            if ((currentLimiterLoopCounter++ % every) == 0) {
-                cachedCurrentLimiterMultiplier = computeCurrentLimiterMultiplier(optimizeCurrentLimiterTelemetry);
-                currentLoopTimer.reset();
-            }
-            lastCurrentLimiterMultiplier = cachedCurrentLimiterMultiplier;
-        }
+        // The floodgate is an analog input (served by the once-per-loop bulk read, no extra bus call),
+        // so compute every loop — finer sampling for the I²·t integral, at no cost.
+        lastCurrentLimiterMultiplier = computeCurrentLimiterMultiplier(drivetrainTelemetry.TOGGLE);
+        currentLoopTimer.reset();
         flPower = fl * lastCurrentLimiterMultiplier;
         blPower = bl * lastCurrentLimiterMultiplier;
         brPower = br * lastCurrentLimiterMultiplier;
@@ -188,10 +176,6 @@ public class Drivetrain extends Module {
     public double getFloodgateCurrent() {
         double voltage = floodgate.getVoltage();
         return (voltage / 3.3) * 80.0;
-    }
-
-    public double getCurrentLimiterMultiplier() {
-        return computeCurrentLimiterMultiplier(true);
     }
 
     private double computeCurrentLimiterMultiplier(boolean emitTelemetry) {
@@ -286,13 +270,6 @@ public class Drivetrain extends Module {
     }
 
     public double[] getMotorPowers() {
-        if (optimizeMotorPowersCaching) {
-            cachedMotorPowers[0] = flPower;
-            cachedMotorPowers[1] = blPower;
-            cachedMotorPowers[2] = brPower;
-            cachedMotorPowers[3] = frPower;
-            return cachedMotorPowers;
-        }
         return new double[]{flPower, blPower, brPower, frPower};
     }
 

@@ -43,6 +43,9 @@ public abstract class EnhancedOpMode extends OpMode {
     private List<LynxModule> lynxHubs;
     private int loopIndex = 0;
     private long monotonicLoopCount = 0;
+    private long profiledLoopCount = 0;
+    private double profiledLoopSumMs = 0;
+    private double profiledLoopMaxMs = 0;
     private int voltageLoopCounter = 0;
     private int dashboardLoopCounter = 0;
     private int dashboardPoseHistoryLoopCounter = 0;
@@ -194,6 +197,9 @@ public abstract class EnhancedOpMode extends OpMode {
         // Drop init-phase timings so the first match loops don't average them into loop time.
         for (int i = 0; i < loopTimes.length; i++) loopTimes[i] = 0.0;
         loopIndex = 0;
+        profiledLoopCount = 0;
+        profiledLoopSumMs = 0;
+        profiledLoopMaxMs = 0;
         profiler.reset();
         Actions.reset();
         scheduleStartupActions();
@@ -418,9 +424,13 @@ public abstract class EnhancedOpMode extends OpMode {
     }
 
     private void recordLoopTime() {
-        loopTimes[loopIndex] = loopTimer.milliseconds();
+        double ms = loopTimer.milliseconds();
+        loopTimes[loopIndex] = ms;
         loopIndex = (loopIndex + 1) % loopTimes.length;
         monotonicLoopCount++;
+        profiledLoopCount++;
+        profiledLoopSumMs += ms;
+        if (ms > profiledLoopMaxMs) profiledLoopMaxMs = ms;
     }
 
     private void updateTelemetry() {
@@ -458,6 +468,10 @@ public abstract class EnhancedOpMode extends OpMode {
                     Map.Entry<String, Double> entry = snapshot.get(i);
                     et.addDashboardData(entry.getKey(), "%.2fms", entry.getValue());
                 }
+                // Single copy-pasteable dashboard value: whole-run per-section avg/peak/count.
+                double loopAvg = profiledLoopCount == 0 ? 0 : profiledLoopSumMs / profiledLoopCount;
+                et.addDashboardData("LOOP_DUMP",
+                        profiler.report(profiledLoopCount, loopAvg, profiledLoopMaxMs));
             }
 
             renderFieldMap(currentPose);
