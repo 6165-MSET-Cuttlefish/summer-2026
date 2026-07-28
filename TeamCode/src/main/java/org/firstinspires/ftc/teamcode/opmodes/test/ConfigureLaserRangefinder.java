@@ -29,8 +29,6 @@ public class ConfigureLaserRangefinder extends LinearOpMode {
         telemetry.addData("Timing [budget, period]", Arrays.toString(lrf.getTiming()));
         telemetry.addData("ROI",            Arrays.toString(lrf.getROI()));
         telemetry.addData("Optical center", Arrays.toString(lrf.getOpticalCenter()));
-        telemetry.addLine();
-        telemetry.addLine("Press Start to write configuration.");
         telemetry.update();
 
         waitForStart();
