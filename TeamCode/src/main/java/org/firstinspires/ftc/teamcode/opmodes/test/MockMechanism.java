@@ -17,7 +17,7 @@ public class MockMechanism extends Module {
         Status(double value) { setValue(value); }
     }
 
-    @Config
+    @Config("Mock Mechanism")
     public static class Tuning {
         public static String pulseMotorName = "";
         public static double pulsePower = 0.2;

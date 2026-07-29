@@ -19,7 +19,7 @@ import org.firstinspires.ftc.teamcode.architecture.action.Actions;
 @Autonomous(name = "Mock Architecture Test", group = "test")
 public class MockAuto extends EnhancedOpMode {
 
-    @Config
+    @Config("Mock Auto")
     public static class Tuning {
         public static boolean enableDrive = false;
         public static double driveInches = 24;

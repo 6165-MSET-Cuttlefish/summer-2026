@@ -25,17 +25,19 @@ import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
  * matching reverse{Corner} flag on the dashboard for any wheel spinning backwards — the flags are
  * applied live, no restart needed. Once all four agree, set wheelTest false and run for real.
  *
- * The MB1242 floors at 20 cm — anything closer still reports 20 — which happens to be exactly the
- * stop distance here, so the floor works in our favor. Don't lower stopDistanceCm below 20 for this
- * sensor; the reading simply won't follow you down.
+ * The MB1242 floors at 20 cm — anything closer still reports 20 — so stopDistanceCm must stay above
+ * that or the reading won't follow the robot down and it will creep in forever. 25 cm leaves a
+ * usable margin.
+ *
+ * Gamepad A releases the stop latch if you want it to approach again without restarting.
  */
 @TeleOp(name = "Predictive Braking (Ultrasonic)", group = "Test")
 public class PredictiveBrakingUltrasonicTest extends OpMode {
 
-    @Config
+    @Config("Braking Ultrasonic Test")
     public static class Tuning {
         /** True: skip braking, spin every wheel at 20% so you can spot a reversed one. */
-        public static boolean wheelTest = true;
+        public static boolean wheelTest = false;
         public static double wheelTestPower = 0.2;
         /** Forward power the braking logic gets to clamp down from. */
         public static double driveSpeed = 1.0;
@@ -99,24 +101,34 @@ public class PredictiveBrakingUltrasonicTest extends OpMode {
             return;
         }
 
+        if (gamepad1.a) {
+            braking.resetStop();
+        }
+
         braking.read();
         double power = braking.clampApproachPower(Tuning.driveSpeed);
         drive(power);
 
         double cm = braking.getDistanceCm();
+        double predictedCm = braking.getPredictedDistanceCm();
+        double closingCmPerSec = braking.getClosingVelocityCmPerSec();
 
-        telemetry.addData("distance cm", "%.0f", cm);
-        telemetry.addData("distance in", "%.2f", DistanceUnit.INCH.fromCm(cm));
-        telemetry.addData("power",       "%.3f", power);
-        telemetry.addData("ceiling",     "%.3f", braking.getPowerCeiling());
-        telemetry.addData("braking",     braking.isBraking());
+        telemetry.addData("distance cm",  "%.0f", cm);
+        telemetry.addData("predicted cm", "%.1f", predictedCm);
+        telemetry.addData("closing cm/s", "%.1f", closingCmPerSec);
+        telemetry.addData("power",        "%.3f", power);
+        telemetry.addData("ceiling",      "%.3f", braking.getPowerCeiling());
+        telemetry.addData("braking",      braking.isBraking());
+        telemetry.addData("stopped",      braking.isStopped());
         telemetry.update();
 
         TelemetryPacket packet = new TelemetryPacket();
-        packet.put("distance_cm", cm);
-        packet.put("power",       power);
-        packet.put("ceiling",     braking.getPowerCeiling());
-        packet.put("stop_cm",     PredictiveBraking.Tuning.stopDistanceCm);
+        packet.put("distance_cm",  cm);
+        packet.put("predicted_cm", predictedCm);
+        packet.put("closing_cm_s", closingCmPerSec);
+        packet.put("power",        power);
+        packet.put("ceiling",      braking.getPowerCeiling());
+        packet.put("stop_cm",      PredictiveBraking.Tuning.stopDistanceCm);
         dashboard.sendTelemetryPacket(packet);
     }
 
