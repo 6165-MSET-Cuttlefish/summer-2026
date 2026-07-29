@@ -30,7 +30,7 @@ import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 @TeleOp(name = "Maxbotix Ultrasonic", group = "Test")
 public class MaxbotixUltrasonicTest extends OpMode {
 
-    @Config
+    @Config("Ultrasonic Sensor Test")
     public static class Tuning {
         /**
          * Delay between commanding a ping and reading the result. The datasheet wants 100 ms

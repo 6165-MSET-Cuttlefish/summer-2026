@@ -224,6 +224,8 @@ Plus framework-wide knobs:
 
 Avoid scattering ad-hoc `public static double` fields. If something is tunable, it lives in one of the buckets above.
 
+**Nested `@Config` classes must be given an explicit name** — `@Config("Shooter")`, not bare `@Config`. Slothboard's `FtcDashboardScanner` registers each config class under `cls.getSimpleName()`, which for a nested class is just `Tuning`, so every bare `@Config public static class Tuning` in the project collides on one dashboard key and all but one silently disappear. Top-level `@Config` classes are fine unnamed since their simple names are already unique.
+
 ## Testing
 
 `architecture/testing/HardwareTest` provides nested abstract OpMode templates for single-device bench tests:

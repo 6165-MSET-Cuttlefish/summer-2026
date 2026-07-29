@@ -34,7 +34,7 @@ import org.firstinspires.ftc.teamcode.architecture.hardware.LaserRangefinder;
 @TeleOp(name = "Predictive Braking (Laser)", group = "Test")
 public class PredictiveBrakingLaserTest extends OpMode {
 
-    @Config
+    @Config("Braking Laser Test")
     public static class Tuning {
         /** True: skip braking, spin every wheel at 20% so you can spot a reversed one. */
         public static boolean wheelTest = true;
