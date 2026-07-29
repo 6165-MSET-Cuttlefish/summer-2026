@@ -19,7 +19,7 @@ import org.firstinspires.ftc.teamcode.purepursuit.math.PurePursuit;
 @Config
 public class PurePursuitTuner extends LinearOpMode {
     public static double searchRad = 8;
-    public static double maxPower = 0.65;
+    public static double maxPower = 1.0;
     public static double kSQx = 0.05, kSQy = 0.05, kF = 0.1;
     public static double hP = 1.5, hI = 0, hD = 0.05;
 
@@ -81,10 +81,10 @@ public class PurePursuitTuner extends LinearOpMode {
 //            bot.purePursuit.kSQy = kSQy;
 //            bot.purePursuit.kF = kF;
 //            bot.purePursuit.hPID = new PIDCoefficients(hP, hI, hD);
-//            Actions.runBlocking(bot.followPath(l_spline));
-//            Actions.runBlocking(bot.followPathReversed(l_spline.reverse()));
+//            Actions.runBlocking(bot.followPathConstantHeading(line, 0));
+//            Actions.runBlocking(bot.followPathConstantHeading(line.reverse(), 0));
 //        }
-        Actions.runBlocking(bot.followPath(l_spline));
+        Actions.runBlocking(bot.followPath(line));
         bot.purePursuit.mecDrive.setPowers(0, 0, 0, 0);
         Pose finalPose = bot.purePursuit.pose;
         telemetry.addData("FinalX", finalPose.x);
