@@ -89,7 +89,10 @@ public class Close extends DecodeAuto {
     @Override
     protected void buildAutonomousSequence() {
         PathActionBuilder builder = new PathActionBuilder(robot.follower, () -> (long) getGameTimer().milliseconds());
-        builder.setStartPose(robot.follower.getPose());
+        // Anchor to the DECLARED start pose, not the live one: the route is then the ideal path in fixed
+        // field coordinates (what Field View draws), so placement error shows up as visible drift instead
+        // of silently translating the whole auto.
+        builder.setStartPose(getStartPose());
 
         addPreloadSecondRow(builder, runSecondRow);
         addGateIntake(builder, false, runGateIntake);

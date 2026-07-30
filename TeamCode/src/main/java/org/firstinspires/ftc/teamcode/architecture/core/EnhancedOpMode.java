@@ -48,7 +48,6 @@ public abstract class EnhancedOpMode extends OpMode {
     private double profiledLoopMaxMs = 0;
     private int voltageLoopCounter = 0;
     private int dashboardLoopCounter = 0;
-    private int dashboardPoseHistoryLoopCounter = 0;
     private int telemetryLoopCounter = 0;
 
     private final List<Module> modules = new ArrayList<>();
@@ -93,6 +92,13 @@ public abstract class EnhancedOpMode extends OpMode {
 
     /** Called at the top of every init_loop and loop, before module reads. */
     protected void onLoopStart() {}
+
+    /**
+     * Draw game-specific field overlay. Called only on loops where the packet is actually SENT — every
+     * dashboard frame is standalone, so anything drawn on a subset of sent frames flickers. Draw here
+     * rather than into {@code robot.packet} from game code, which cannot know if the packet is sent.
+     */
+    protected void dashboardOverlay(Canvas overlay) {}
 
     @Override
     public final void init() {
@@ -191,7 +197,6 @@ public abstract class EnhancedOpMode extends OpMode {
         voltageLoopCounter = 0;
         telemetryLoopCounter = 0;
         dashboardLoopCounter = 0;
-        dashboardPoseHistoryLoopCounter = 0;
         loopsSinceFieldRender = Integer.MAX_VALUE;
         lastCurrentReadLoop = Long.MIN_VALUE;
         // Drop init-phase timings so the first match loops don't average them into loop time.
@@ -531,11 +536,10 @@ public abstract class EnhancedOpMode extends OpMode {
         FieldVisualization.drawRobot(overlay, robot.follower.getPose());
 
         if (!dashboardSkipPoseHistory) {
-            int poseEvery = Math.max(1, dashboardPoseHistoryEveryNLoops);
-            if ((dashboardPoseHistoryLoopCounter++ % poseEvery) == 0) {
-                FieldVisualization.drawPoseHistory(overlay, robot.follower.getPoseHistory());
-            }
+            FieldVisualization.drawPoseHistory(overlay, robot.follower.getPoseHistory());
         }
+
+        dashboardOverlay(overlay);
 
         FtcDashboard.getInstance().sendTelemetryPacket(robot.packet);
         robot.packet = new TelemetryPacket(false);

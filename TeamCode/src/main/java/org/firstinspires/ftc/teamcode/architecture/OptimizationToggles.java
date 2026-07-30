@@ -13,7 +13,6 @@ public final class OptimizationToggles {
     public static boolean dashboardSkipGrid = false;
     public static boolean dashboardSkipPoseHistory = false;
 
-    public static int dashboardPoseHistoryEveryNLoops = 3;
 
     public static int telemetryEveryNLoops = 1;
 
