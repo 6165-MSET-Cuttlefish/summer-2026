@@ -47,14 +47,15 @@ public class Magazine extends Module {
     public static PrismAnimations.RainbowSnakes rainbowSnakes = new PrismAnimations.RainbowSnakes();
     public static boolean prismWritesEnabled = true;
 
-    // Perf toggles relocated from Decode's framework OptimizationToggles, which summer's audit
-    // slimmed and no longer carries; kept here as per-mechanism config so defaults/behavior match.
     public static boolean optimizeServoCachingTolerances = true;
     public static boolean optimizeSensorCadence = false;
     public static int optimizeDistanceSensorEveryNLoops = 2;
     public static int optimizeColorSensorEveryNLoops = 2;
+    // A filled slot whose color never resolves would otherwise re-read its 2 I2C sensors every loop
+    // forever; cap the attempts (reset when the slot empties). High enough that normal reads (1-3
+    // loops) never hit it.
+    public static int colorDetectMaxAttempts = 15;
 
-    // LED index layout for magazine visualization (36 LEDs = 12 per slot)
     private static final int FRONT_START_LEFT = 0;
     private static final int FRONT_END_LEFT   = 5;
     private static final int FRONT_START_RIGHT = 30;
@@ -70,7 +71,6 @@ public class Magazine extends Module {
     private static final int BACK_START_RIGHT = 18;
     private static final int BACK_END_RIGHT   = 23;
 
-    // Solids used to paint each slot side on the Prism (one animation per layer)
     private final PrismAnimations.Solid frontLeftSlotSolid   = new PrismAnimations.Solid();
     private final PrismAnimations.Solid frontRightSlotSolid  = new PrismAnimations.Solid();
     private final PrismAnimations.Solid middleLeftSlotSolid  = new PrismAnimations.Solid();
@@ -99,7 +99,6 @@ public class Magazine extends Module {
     private static final double STROBE_SPEED = 0.05;
     private static final long STROBE_INTERVAL_MS = 50;
 
-    // Ball detection state for sequential 3-ball fill
     private boolean backSlotsFilled = false;
     private boolean middleSlotFilled = false;
     private int backSlotsFilledLoops = 0;
@@ -109,12 +108,11 @@ public class Magazine extends Module {
     public boolean intakeIsFull = false;
     public boolean shotSorted = true;
     public static int slotFillConsecutiveLoops = 3;
-    // Grace period: how long the front sensors can lose sight of the ball before un-latching intakeIsFull
     public static long intakeBallDropoutGraceMs = 200;
 
-    // Ball detection proximity threshold (mm) - ball is present if distance is below this
-    public static double frontLeftDistanceThreshold = 45; // 46
-    public static double frontRightDistanceThreshold = 30; // 46
+    // mm; a ball is present when the reading is below the threshold.
+    public static double frontLeftDistanceThreshold = 45;
+    public static double frontRightDistanceThreshold = 30;
 
     public static double middleBackDistanceThreshold = 40;
     public static double middleFrontDistanceThreshold = 20;
@@ -127,15 +125,16 @@ public class Magazine extends Module {
     public static boolean updateColorSensor = true;
 
     private int distanceSensorLoopCounter = 0;
-    private int colorSensorLoopCounter = 0;
+    // Offset one phase so distance + color fire on opposite loops (not the same loop) when
+    // optimizeSensorCadence throttles them — uniform loop time instead of a heavy/light sawtooth.
+    private int colorSensorLoopCounter = 1;
 
     private MagazineState.ArtifactColor savedBackColor = MagazineState.ArtifactColor.EMPTY;
     private MagazineState.ArtifactColor savedMiddleColor = MagazineState.ArtifactColor.EMPTY;
     private MagazineState.ArtifactColor savedFrontColor = MagazineState.ArtifactColor.EMPTY;
+    private int backColorAttempts, middleColorAttempts, frontColorAttempts;
 
-    /**
-     * Units: servo position units per millisecond (e.g. 0.002 = 0.02 per 10ms loop)
-     */
+    /** Servo position units per millisecond. */
     public static double horizontalFrontSpeed = 0.0008;
     public static double horizontalBackSpeed = 0.0005;
     private double currentHorizontalFrontPosition = Double.NaN;
@@ -292,8 +291,7 @@ public class Magazine extends Module {
         onEnter(VerticalState.ON, this::resetBallDetection);
         onEnter(IntakeState.ANALOG_EXTAKE, this::resetBallDetection);
 
-        // onEnter won't fire for the initial state (same-state transition is a no-op),
-        // so explicitly clear the Prism at init.
+        // onEnter never fires for the initial state, so clear the Prism explicitly here.
         loadPrismArtboard(GoBildaPrismDriver.Artboard.ARTBOARD_2);
     }
 
@@ -381,10 +379,6 @@ public class Magazine extends Module {
                 updateMagazineColorState();
             }
         }
-
-        // For testing: continuously read color sensors into currentState
-        // and mirror that state on the Prism LEDs.
-//        updateMagazinePrismLeds();
     }
 
     @Override
@@ -414,8 +408,9 @@ public class Magazine extends Module {
             return;
         }
 
-        if (savedBackColor == MagazineState.ArtifactColor.EMPTY) {
+        if (savedBackColor == MagazineState.ArtifactColor.EMPTY && backColorAttempts < colorDetectMaxAttempts) {
             savedBackColor = detectSectionColor(backRightColor, backLeftColor, 3);
+            if (savedBackColor == MagazineState.ArtifactColor.EMPTY) backColorAttempts++;
         }
 
         if (!middleSlotFilled) {
@@ -427,8 +422,9 @@ public class Magazine extends Module {
             return;
         }
 
-        if (savedMiddleColor == MagazineState.ArtifactColor.EMPTY) {
+        if (savedMiddleColor == MagazineState.ArtifactColor.EMPTY && middleColorAttempts < colorDetectMaxAttempts) {
             savedMiddleColor = detectSectionColor(middleFrontColor, middleBackColor, 2);
+            if (savedMiddleColor == MagazineState.ArtifactColor.EMPTY) middleColorAttempts++;
         }
 
         if (!intakeIsFull) {
@@ -440,8 +436,9 @@ public class Magazine extends Module {
             return;
         }
 
-        if (savedFrontColor == MagazineState.ArtifactColor.EMPTY) {
+        if (savedFrontColor == MagazineState.ArtifactColor.EMPTY && frontColorAttempts < colorDetectMaxAttempts) {
             savedFrontColor = detectSectionColor(frontLeftColor, frontRightColor, 1);
+            if (savedFrontColor == MagazineState.ArtifactColor.EMPTY) frontColorAttempts++;
         }
 
         currentState = new MagazineState(savedBackColor, savedMiddleColor, savedFrontColor);
@@ -449,16 +446,19 @@ public class Magazine extends Module {
 
     private void clearBackAndForwardColorLatches() {
         savedBackColor = MagazineState.ArtifactColor.EMPTY;
+        backColorAttempts = 0;
         clearMiddleAndFrontColorLatches();
     }
 
     private void clearMiddleAndFrontColorLatches() {
         savedMiddleColor = MagazineState.ArtifactColor.EMPTY;
+        middleColorAttempts = 0;
         clearFrontColorLatch();
     }
 
     private void clearFrontColorLatch() {
         savedFrontColor = MagazineState.ArtifactColor.EMPTY;
+        frontColorAttempts = 0;
     }
 
     private void updateDistanceDetection() {
@@ -505,10 +505,10 @@ public class Magazine extends Module {
             return;
         }
 
-        double frontLeftDist = frontLeftDistance.getDistance(DistanceUnit.MM);
-        double frontRightDist = frontRightDistance.getDistance(DistanceUnit.MM);
-        boolean frontFilledNow = frontLeftDist < frontLeftDistanceThreshold
-                && frontRightDist < frontRightDistanceThreshold;
+        // Inlined so && short-circuits: skips a live I2C read when the left slot already reads empty.
+        boolean frontFilledNow =
+                frontLeftDistance.getDistance(DistanceUnit.MM) < frontLeftDistanceThreshold
+                        && frontRightDistance.getDistance(DistanceUnit.MM) < frontRightDistanceThreshold;
 
         if (frontFilledNow) {
             frontSlotFilledLoops++;
@@ -740,12 +740,7 @@ public class Magazine extends Module {
         return currentState.countColor(color);
     }
 
-    /**
-     * Determines which storage compartments to use based on the current magazine
-     * state and the desired target pattern.
-     * <p>
-     * horizontalBack stores the back slot ball; horizontalFront stores the middle slot ball.
-     */
+    /** horizontalBack stores the back-slot ball; horizontalFront stores the middle-slot ball. */
     public StorageDecision checkAndStoreBalls(MagazineState target) {
         updateMagazineColorState();
 
@@ -753,8 +748,8 @@ public class Magazine extends Module {
         MagazineState.ArtifactColor ball2 = currentState.getPosition2(); // middle
         MagazineState.ArtifactColor ball3 = currentState.getPosition3(); // front
 
-        MagazineState.ArtifactColor color1 = target.getPosition1(); // target back
-        MagazineState.ArtifactColor color2 = target.getPosition2(); // target middle
+        MagazineState.ArtifactColor color1 = target.getPosition1();
+        MagazineState.ArtifactColor color2 = target.getPosition2();
 
         if (countColor(MagazineState.ArtifactColor.GREEN) >= 2
                 ||  countColor(MagazineState.ArtifactColor.PURPLE) == 3
@@ -766,12 +761,11 @@ public class Magazine extends Module {
         boolean storeInFront;
 
         if (ball1 == color1) {
-            // Back ball already matches — check if middle and front match too
             storeInBack = false;
             MagazineState.ArtifactColor color3 = target.getPosition3();
             storeInFront = !(ball2 == color2 && ball3 == color3);
         } else {
-            // Back ball doesn't match — store it; after storing, ball2→back, ball3→middle
+            // Storing the back ball shifts ball2 → back and ball3 → middle, hence the index skew.
             storeInBack = true;
             storeInFront = !(ball2 == color1 && ball3 == color2);
         }
@@ -894,7 +888,6 @@ public class Magazine extends Module {
                 logDashboard("Back", currentState.getPosition1());
                 logDashboard("Middle", currentState.getPosition2());
                 logDashboard("Front", currentState.getPosition3());
-//                logDashboard("Front Left Distance", frontLeftDistance.getDistance(DistanceUnit.MM));
                 logDashboard("Front Ball Detected", intakeIsFull);
             }
         }

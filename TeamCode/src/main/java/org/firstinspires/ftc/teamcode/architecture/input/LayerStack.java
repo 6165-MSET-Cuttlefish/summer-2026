@@ -6,7 +6,7 @@ import java.util.Set;
 
 /**
  * Keyed stack of gamepads — exactly one is active at a time; the rest are forced to
- * {@code atRest} so their suppliers read neutral. Layer keys are typically a small enum.
+ * {@code atRest} so their suppliers read neutral.
  */
 public class LayerStack<T> {
 
@@ -29,10 +29,8 @@ public class LayerStack<T> {
     public T getLayer() { return currentLayer; }
 
     /**
-     * Notified after any actual {@code currentLayer} change. {@link LayeredGamepad} subscribes so its
-     * facade suppliers get primed+suppressed even when a caller changes layers on the stack directly
-     * (bypassing {@code LayeredGamepad.setLayer}); otherwise a held button fires a spurious edge on
-     * the new layer. Not fired by {@link #update()} (no layer change there).
+     * Fired after any real layer change so {@link LayeredGamepad} primes its facade even when a caller
+     * changes layers on the stack directly; otherwise a held button fires a spurious edge on the new layer.
      */
     void setOnLayerChange(Runnable onLayerChange) { this.onLayerChange = onLayerChange; }
 

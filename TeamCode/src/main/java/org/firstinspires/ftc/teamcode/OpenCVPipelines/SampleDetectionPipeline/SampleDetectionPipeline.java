@@ -108,8 +108,15 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
     //
     // Lower further (e.g. 0.35) for more speed if 0.5 isn't enough; raise
     // toward 1.0 only if small/distant balls stop being detected reliably.
+    //
+    // Dropped to 0.35 for velocity/tracking use: at 0.5 this was measuring ~570ms/frame (well
+    // before the ROI-sizing bug fix above, which was the bigger cost — this is a second,
+    // independent lever on top of that fix). Trade-off: MIN_SEED_SEPARATION_PX (12px) is a fixed
+    // pixel distance, so at a lower scale it represents a larger fraction of the frame — balls
+    // sitting very close together are more likely to merge into one seed. Raise back toward 0.5
+    // if that shows up in practice.
     // -------------------------------------------------------------------------
-    private static final double DETECTION_SCALE = 0.5;
+    private static final double DETECTION_SCALE = 0.35;
 
     // -------------------------------------------------------------------------
     // Yellow ball HSV range.
@@ -145,6 +152,11 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
 
     private static final double MIN_SEED_DEPTH_PX = 2.0;
 
+    // Background owns label 1, so connected-component seed labels (which start at 1) are shifted
+    // up by one to keep clear of it.
+    private static final int WS_BACKGROUND_LABEL  = 1;
+    private static final int WS_SEED_LABEL_OFFSET = 1;
+
     // -------------------------------------------------------------------------
     // Final per-region validation.
     //
@@ -155,11 +167,21 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
     // near-perfect circle, we accept anything "close enough" — a small notch
     // should not disqualify an otherwise round, correctly-sized blob.
     // -------------------------------------------------------------------------
-    private static final double MIN_AREA_FRACTION = 0.00005;
+    private static final double MIN_AREA_FRACTION = 0.0001;
+    // Was 1 (100% of frame), which silently disabled the "too large to be a ball" rejection
+    // entirely (nothing can ever exceed the whole frame) and, via the ROI-pad math below, made
+    // every candidate's processing ROI the entire frame too. 0.15 still comfortably admits a ball
+    // right up against the lens while actually rejecting frame-filling glare/lighting blobs.
     private static final double MAX_AREA_FRACTION = 0.15;
     private static final double MIN_CIRCULARITY = 0.25;
     private static final double MIN_ROUNDNESS_RATIO = 0.30;
     private static final double MIN_SEED_SEPARATION_PX = 12.0;
+    // Independent of MAX_AREA_FRACTION on purpose: that constant stays generous for the
+    // accept/reject check, but reusing it here (as this used to) sizes every per-candidate ROI
+    // off a "ball could be up to 15% of the frame" bound, which is still ~full-frame at this
+    // detection resolution. This bound only controls how big a crop we search around each seed,
+    // so it can — and should — be much tighter than the rejection ceiling.
+    private static final double ROI_MAX_BALL_AREA_FRACTION = 0.02;
 
     // -------------------------------------------------------------------------
     // Homography calibration settings — GRID_COLS=9, GRID_ROWS=6 matches the
@@ -221,6 +243,23 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
     private final Mat displayImage = new Mat();
     // Reused findContours hierarchy output — was a per-seed `new Mat()` that leaked every frame.
     private final Mat contourHierarchy = new Mat();
+    // Watershed-seeding scratch space, likewise reused across frames instead of `new Mat()` per
+    // frame — OpenCV's out-param calls (dilate/compare/convertTo/connectedComponentsWithStats)
+    // all auto-resize their destination Mat via create(), so reuse here is safe and free.
+    private final Mat dilated       = new Mat();
+    private final Mat isPeak        = new Mat();
+    private final Mat deepEnough    = new Mat();
+    private final Mat seedMask      = new Mat();
+    private final Mat ccLabels      = new Mat();
+    private final Mat ccStats       = new Mat();
+    private final Mat ccCentroids   = new Mat();
+    private final Mat freshMarkers  = new Mat();
+    private final Mat upscaledMask  = new Mat();
+    // watershed() hard-asserts CV_8UC3 and aborts the process (not a catchable exception) on
+    // mismatch. EasyOpenCV hands processFrame() an RGBA (4-channel) Mat, so `small` — a plain
+    // resize of `input` — is 4-channel too; watershedSrc is the 3-channel conversion watershed
+    // actually needs.
+    private final Mat watershedSrc  = new Mat();
 
     private final MatOfPoint2f dstCorners;
 
@@ -231,6 +270,15 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
         Point centerSmall;
         Point contactSmall;
         Point fieldPoint;
+    }
+
+    private static class CandidateStats {
+        Point seedSmall;
+        double areaFraction;
+        double circularity;
+        double roundness;
+        String rejectReason;
+        int ballIndex = -1;
     }
 
     // =========================================================================
@@ -371,33 +419,26 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
         }
 
         List<BallResult> results = new ArrayList<>();
+        List<CandidateStats> candidates = new ArrayList<>();
+        int rawSeedCount = 0;
 
         if (Core.countNonZero(holeFilled) > 0) {
 
             Imgproc.distanceTransform(holeFilled, distMat, Imgproc.DIST_L2, 3);
 
-            Mat dilated = new Mat();
             Imgproc.dilate(distMat, dilated, LOCAL_MAX_KERNEL);
-            Mat isPeak = new Mat();
             Core.compare(distMat, dilated, isPeak, Core.CMP_EQ);
 
-            Mat deepEnough = new Mat();
             Core.compare(distMat, new Scalar(MIN_SEED_DEPTH_PX), deepEnough, Core.CMP_GE);
             Core.bitwise_and(isPeak, deepEnough, isPeak);
-            dilated.release();
-            deepEnough.release();
 
-            Mat seedMask = new Mat();
             isPeak.convertTo(seedMask, CvType.CV_8U);
-            isPeak.release();
 
-            Mat ccLabels    = new Mat();
-            Mat ccStats     = new Mat();
-            Mat ccCentroids = new Mat();
             int numLabels = Imgproc.connectedComponentsWithStats(seedMask, ccLabels, ccStats,
                     ccCentroids, 8, CvType.CV_32S);
 
             List<double[]> seedCenters = new ArrayList<>();
+            rawSeedCount = Math.max(0, numLabels - 1);
             for (int lbl = 1; lbl < numLabels; lbl++) {
                 double cx = ccCentroids.get(lbl, 0)[0];
                 double cy = ccCentroids.get(lbl, 1)[0];
@@ -417,27 +458,31 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
                 byte[] filledRow = new byte[cols];
                 int[]  labelRow  = new int[cols];
                 int[]  markerRow = new int[cols];
-                Mat freshMarkers = new Mat(rows, cols, CvType.CV_32SC1);
+                freshMarkers.create(rows, cols, CvType.CV_32SC1);
 
+                // watershed reads 0 as "unknown, flood me" and resets negative input markers to 0 as
+                // well, so background MUST carry its own positive label — otherwise the seeds have
+                // nothing to flood against and each one expands to fill the entire frame.
                 for (int row = 0; row < rows; row++) {
                     holeFilled.get(row, 0, filledRow);
                     ccLabels.get(row, 0, labelRow);
                     for (int col = 0; col < cols; col++) {
                         if (filledRow[col] == 0) {
-                            markerRow[col] = 0;
+                            markerRow[col] = WS_BACKGROUND_LABEL;
                         } else if (labelRow[col] > 0) {
-                            markerRow[col] = labelRow[col];
+                            markerRow[col] = labelRow[col] + WS_SEED_LABEL_OFFSET;
                         } else {
-                            markerRow[col] = -1;
+                            markerRow[col] = 0;
                         }
                     }
                     freshMarkers.put(row, 0, markerRow);
                 }
 
-                Mat wsSource = new Mat();
-                Imgproc.cvtColor(small, wsSource, Imgproc.COLOR_RGB2BGR);
-                Imgproc.watershed(wsSource, freshMarkers);
-                wsSource.release();
+                // watershed() only uses this as a color-gradient source for flooding — it doesn't
+                // interpret channel order as RGB vs. BGR, so no RGB2BGR swap is needed here, only
+                // the RGBA->RGB channel-count drop (see watershedSrc's declaration above).
+                Imgproc.cvtColor(small, watershedSrc, Imgproc.COLOR_RGBA2RGB);
+                Imgproc.watershed(watershedSrc, freshMarkers);
 
                 double frameArea = small.cols() * small.rows();
                 double minArea = frameArea * MIN_AREA_FRACTION;
@@ -448,14 +493,23 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
                 // frame. Previously, Core.compare/copyTo/minMaxLoc all ran on
                 // full-size Mats once PER BALL — with N balls that's N passes
                 // over the entire frame. A ROI sized generously around each
-                // seed (using MAX_AREA_FRACTION as an upper bound on ball
-                // size) cuts that down to a small crop per ball, independent
+                // seed cuts that down to a small crop per ball, independent
                 // of how many balls are in the frame.
-                int maxBallDim = (int) Math.ceil(Math.sqrt(maxArea)) * 2;
+                //
+                // BUG THIS FIXES: this used to be sized off `maxArea` (frameArea *
+                // MAX_AREA_FRACTION). MAX_AREA_FRACTION was 1.0 (100% of the frame), so
+                // maxBallDim worked out larger than the frame in both dimensions and every
+                // candidate's "ROI" was silently the entire frame — for N candidates that's N
+                // full-frame Core.compare/findContours/moments passes per frame, which was the
+                // single largest contributor to a ~570ms pipeline frame. Sizing the pad off a
+                // much smaller, realistic "biggest a single ball could look" bound instead of the
+                // (now-fixed, but still deliberately generous) accept/reject ceiling restores an
+                // actual small per-ball crop.
+                int maxBallDim = (int) Math.ceil(Math.sqrt(frameArea * ROI_MAX_BALL_AREA_FRACTION)) * 2;
                 int roiPad = Math.max(8, maxBallDim);
 
                 for (double[] seed : seedCenters) {
-                    int label = (int) seed[2];
+                    int label = (int) seed[2] + WS_SEED_LABEL_OFFSET;
                     int seedCx = (int) seed[0];
                     int seedCy = (int) seed[1];
 
@@ -463,7 +517,15 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
                     int roiY = Math.max(0, seedCy - roiPad);
                     int roiW = Math.min(freshMarkers.cols() - roiX, roiPad * 2);
                     int roiH = Math.min(freshMarkers.rows() - roiY, roiPad * 2);
-                    if (roiW <= 0 || roiH <= 0) continue;
+
+                    CandidateStats stats = new CandidateStats();
+                    stats.seedSmall = new Point(seed[0], seed[1]);
+                    candidates.add(stats);
+
+                    if (roiW <= 0 || roiH <= 0) {
+                        stats.rejectReason = "empty ROI";
+                        continue;
+                    }
                     Rect roi = new Rect(roiX, roiY, roiW, roiH);
 
                     // Per-seed native Mats. This loop runs once per candidate ball on every processed
@@ -484,7 +546,10 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
                         Imgproc.findContours(regionMask, regionContours, contourHierarchy,
                                 Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
 
-                        if (regionContours.isEmpty()) continue;
+                        if (regionContours.isEmpty()) {
+                            stats.rejectReason = "no contour";
+                            continue;
+                        }
 
                         MatOfPoint contour = regionContours.get(0);
                         double area = Imgproc.contourArea(contour);
@@ -493,14 +558,11 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
                             if (a > area) { area = a; contour = c; }
                         }
 
-                        if (area < minArea || area > maxArea) continue;
-
                         contour2f = new MatOfPoint2f(contour.toArray());
                         double perimeter = Imgproc.arcLength(contour2f, true);
                         double circularity = perimeter > 0
                                 ? (4 * Math.PI * area) / (perimeter * perimeter)
                                 : 0;
-                        if (circularity < MIN_CIRCULARITY) continue;
 
                         // Distance-transform peak, also restricted to the same ROI
                         distRoi = distMat.submat(roi);
@@ -510,7 +572,29 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
 
                         double impliedRadius = Math.sqrt(area / Math.PI);
                         double roundness = impliedRadius > 0 ? peak / impliedRadius : 0;
-                        if (roundness < MIN_ROUNDNESS_RATIO) continue;
+
+                        // Every metric is computed before any threshold test so rejected
+                        // candidates still report a full set of numbers to telemetry.
+                        stats.areaFraction = area / frameArea;
+                        stats.circularity = circularity;
+                        stats.roundness = roundness;
+
+                        if (area < minArea) {
+                            stats.rejectReason = "area < min";
+                            continue;
+                        }
+                        if (area > maxArea) {
+                            stats.rejectReason = "area > max";
+                            continue;
+                        }
+                        if (circularity < MIN_CIRCULARITY) {
+                            stats.rejectReason = "circularity";
+                            continue;
+                        }
+                        if (roundness < MIN_ROUNDNESS_RATIO) {
+                            stats.rejectReason = "roundness";
+                            continue;
+                        }
 
                         BallResult result = new BallResult();
 
@@ -545,6 +629,7 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
                         double fullResY = contactY / DETECTION_SCALE;
                         result.fieldPoint = transformPointToField(fullResX, fullResY);
 
+                        stats.ballIndex = results.size();
                         results.add(result);
                     } finally {
                         markersRoi.release();
@@ -555,21 +640,12 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
                         for (MatOfPoint c : regionContours) c.release();
                     }
                 }
-
-                freshMarkers.release();
             }
-
-            seedMask.release();
-            ccLabels.release();
-            ccStats.release();
-            ccCentroids.release();
         }
 
         if (DISPLAY_MODE == DisplayMode.MASK) {
-            Mat upscaledMask = new Mat();
             Imgproc.resize(holeFilled, upscaledMask, input.size(), 0, 0, Imgproc.INTER_NEAREST);
             Imgproc.cvtColor(upscaledMask, displayImage, Imgproc.COLOR_GRAY2RGB);
-            upscaledMask.release();
         }
 
         if (DISPLAY_MODE == DisplayMode.BOX) {
@@ -597,6 +673,25 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
             telemetry.addLine("--- Ball " + i + " ---");
             telemetry.addData("  Field X (in)", String.format("%.2f", fp.x));
             telemetry.addData("  Field Y (in)", String.format("%.2f", fp.y));
+        }
+
+        telemetry.addLine();
+        telemetry.addData("Thresholds", String.format(
+                "area %.5f-%.2f | circ >=%.2f | round >=%.2f | seedSep >=%.1fpx",
+                MIN_AREA_FRACTION, MAX_AREA_FRACTION, MIN_CIRCULARITY,
+                MIN_ROUNDNESS_RATIO, MIN_SEED_SEPARATION_PX));
+        telemetry.addData("Seeds", rawSeedCount + " raw -> " + candidates.size()
+                + " after " + MIN_SEED_SEPARATION_PX + "px merge");
+        telemetry.addData("Candidates", candidates.size() + " (" + results.size()
+                + " passed, " + (candidates.size() - results.size()) + " rejected)");
+        for (int i = 0; i < candidates.size(); i++) {
+            CandidateStats c = candidates.get(i);
+            telemetry.addLine(String.format("--- Cand %d @ (%.0f,%.0f) %s ---",
+                    i, c.seedSmall.x, c.seedSmall.y,
+                    c.rejectReason == null ? "BALL " + c.ballIndex : "REJECT: " + c.rejectReason));
+            telemetry.addData("  areaFrac", String.format("%.6f", c.areaFraction));
+            telemetry.addData("  circularity", String.format("%.3f", c.circularity));
+            telemetry.addData("  roundness", String.format("%.3f", c.roundness));
         }
         telemetry.update();
 

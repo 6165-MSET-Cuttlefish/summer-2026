@@ -51,8 +51,7 @@ public class Shooter extends Module {
         public double LP2Rate = 0.3;
     }
 
-    // Hood compensation: servo units of adjustment per 100 RPM of velocity drop.
-    // Positive gain = lower hood when velocity drops (e.g. 0.01 → hood drops 0.01 for a 100 RPM drop)
+    // Servo units of hood drop per 100 RPM of velocity deficit; positive lowers the hood.
     public static double closeAutoHoodCompGain = 0.0165;
 
     public static boolean bangBangEnabled = true;
@@ -81,7 +80,7 @@ public class Shooter extends Module {
 
     public enum FlywheelState implements State {
         IDLE(1800),
-        FAR(3150.0), // middle of closer tape: 3250 rpm, 0.82 hood; 3100 rpm, 0.78 hood // middle of further tape: 3350 rpm, 0.82 hood; 3100 rpm, 0.78 hood
+        FAR(3150.0),
         FAR_AUTO(3150.0),
         CLOSE(2750),
         CLOSE_AUTO(2420),
@@ -98,8 +97,7 @@ public class Shooter extends Module {
         }
     }
 
-    // Ball sequence tracking for multi-ball shots
-    public int ballInSequence = 2; // 1, 2, or 3
+    public int ballInSequence = 2;
 
     public enum HoodState implements State {
         RESET(0.585),
@@ -187,8 +185,6 @@ public class Shooter extends Module {
         }
         hoodPosition += hoodOffset;
 
-        // Hood velocity compensation for CLOSE_AUTO shots:
-        // when measured RPM is below target, lower the hood by closeAutoHoodCompGain per 100 RPM deficit.
         FlywheelState fw = getState(FlywheelState.class);
         if (closeAutoHoodCompGain != 0
                 && (fw == FlywheelState.CLOSE_AUTO || fw == FlywheelState.CLOSE_AUTO_PRELOAD)) {
@@ -224,7 +220,6 @@ public class Shooter extends Module {
 
                 logDashboard("PID Error (RPM)", "%.1f", shooterPidController.getError());
                 logDashboard("PID Output", "%.3f", shooterPidOutput);
-                logDashboard("Motor power", "%.5f", left.getPower());
 
                 double bbRPM = targetVelocityRPM * bangBangTolerancePercent;
                 logDashboard("Bang-Bang Error (RPM)", "%.1f", targetVelocityRPM - shooterCurrentVelocityRPM);
@@ -315,7 +310,6 @@ public class Shooter extends Module {
     }
 
     private double calculateShooterPIDPower() {
-        // Recompute Kf only when targetVelocityRPM or FScale changes
         if (targetVelocityRPM != 0
                 && (targetVelocityRPM != cachedTargetRPMForKf || shooterPid.FScale != cachedFScale)) {
             // https://www.desmos.com/calculator/ykvsfthqvf
@@ -324,7 +318,6 @@ public class Shooter extends Module {
             cachedTargetRPMForKf = targetVelocityRPM;
             cachedFScale = shooterPid.FScale;
         }
-        // Only call setGains when any coefficient actually changes
         if (shooterPid.Kp != cachedKp || shooterPid.Ki != cachedKi || shooterPid.Kd != cachedKd
                 || shooterPid.Kf != cachedKf || shooterPid.Kl != cachedKl) {
             shooterPidController.setGains(
@@ -349,14 +342,6 @@ public class Shooter extends Module {
         return targetVelocityRPM;
     }
 
-    public double getLeftShooterCurrent() {
-        return left.getCurrent(CurrentUnit.AMPS);
-    }
-
-    public double getRightShooterCurrent() {
-        return right.getCurrent(CurrentUnit.AMPS);
-    }
-
     public boolean isAtTargetVelocity() {
         if (targetVelocityRPM > 0) {
             double velocityError = Math.abs(targetVelocityRPM - shooterCurrentVelocityRPM);
@@ -377,7 +362,7 @@ public class Shooter extends Module {
             velocityOffset = farVelocityOffset;
         }
 
-        double currentVelocity = getCurrentVelocityRPM();// - velocityOffset;
+        double currentVelocity = getCurrentVelocityRPM();
         return currentVelocity >= minRPM - VELOCITY_TOLERANCE_RPM && currentVelocity <= maxRPM + VELOCITY_TOLERANCE_RPM;
     }
 

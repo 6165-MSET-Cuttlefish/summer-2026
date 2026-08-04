@@ -21,13 +21,9 @@ import org.firstinspires.ftc.teamcode.architecture.core.State;
 import org.firstinspires.ftc.teamcode.architecture.hardware.EnhancedServo;
 
 /**
- * Two-servo aiming turret with odometry-based auto-aim.
- *
- * <p>Limelight / AprilTag vision is STUBBED OUT for the summer port — the Limelight hardware handle
- * and all MegaTag relocalization + obelisk tag reads are removed. The vision methods
+ * Two-servo aiming turret with odometry-based auto-aim. The Limelight vision methods
  * ({@link #snapshotAprilTagOffset()}, {@link #getRelocalizedRobotPoseFromLimelight()},
- * {@link #detectObelisk()}) keep their signatures so callers compile, but no longer read a camera.
- * The odometry servo-aim math (AUTOAIM / {@link #lock(Pose)}) is fully functional.
+ * {@link #detectObelisk()}) are stubs that read no camera.
  */
 @Config
 public class Turret extends Module {
@@ -96,7 +92,6 @@ public class Turret extends Module {
         super();
         setTelemetryEnabled(turretTelemetry.TOGGLE);
 
-        // Summer OptimizationToggles dropped optimizeServoCachingTolerances; keep its default-on value.
         double turretServoTol = 0.001;
         turretServoFront = new EnhancedServo(hardwareMap, "turretFront").withCachingTolerance(turretServoTol);
         turretServoBack  = new EnhancedServo(hardwareMap, "turretBack").withCachingTolerance(turretServoTol);
@@ -120,10 +115,7 @@ public class Turret extends Module {
         updateTargetPosition();
     }
 
-    /**
-     * Limelight stubbed for the summer port — no AprilTag snapshot is available, so the
-     * AprilTag offset is left unchanged. Signature preserved for callers.
-     */
+    /** No-op: Limelight is stubbed, so the AprilTag offset is left unchanged. */
     public void snapshotAprilTagOffset() {
     }
 
@@ -223,10 +215,7 @@ public class Turret extends Module {
         lastTargetServoPosition = targetServoPosition;
     }
 
-    /**
-     * Limelight stubbed for the summer port — MegaTag relocalization is unavailable, so no
-     * relocalized pose is produced and the odometry pose is left as-is. Signature preserved.
-     */
+    /** Always null: Limelight relocalization is stubbed, so the odometry pose is left as-is. */
     public Pose getRelocalizedRobotPoseFromLimelight() {
         relocalizationStatus = "LIMELIGHT_STUBBED";
         return null;
@@ -269,14 +258,12 @@ public class Turret extends Module {
         TurretState.AUTOAIM.activate();
     }
 
-    /** Returns turret angle in signed degrees (CCW-positive) relative to robot forward. */
     private double getCurrentTurretSignedAngleDeg() {
         double scale = (TurretState.LEFT.getValue() - TurretState.RIGHT.getValue()) / 180.0;
         double liveServoPos = turretServoFront.getPosition();
         return (liveServoPos - TurretState.CENTER.getValue()) / scale;
     }
 
-    /** Converts a turret-relative angle (deg) to servo position [0, 1]. */
     private double angleToServoPosition(double angleDeg) {
         double angle = normalizeAngle(angleDeg);
         double scale = (TurretState.LEFT.getValue() - TurretState.RIGHT.getValue()) / 180.0;
@@ -291,7 +278,7 @@ public class Turret extends Module {
         return Math.max(lo, Math.min(hi, position));
     }
 
-    /** Normalizes an angle to [0, 360). */
+    /** Normalizes to [0, 360) — callers rely on the wrap-at-180 branch, not a signed range. */
     private double normalizeAngle(double angle) {
         angle = angle % 360;
         if (angle < 0) angle += 360;
@@ -305,10 +292,7 @@ public class Turret extends Module {
         return error;
     }
 
-    /**
-     * Limelight stubbed for the summer port — no tag read is performed, so the obelisk motif is
-     * left at the DecodeContext default. Signature preserved for callers.
-     */
+    /** Always false: Limelight is stubbed, so the obelisk motif stays at the DecodeContext default. */
     public boolean detectObelisk() {
         return false;
     }

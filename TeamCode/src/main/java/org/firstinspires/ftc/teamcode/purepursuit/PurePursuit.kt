@@ -54,7 +54,7 @@ class PurePursuit(drive: MecanumDrivePurePursuit) {
 
     @JvmField var telemetryPacket = TelemetryPacket()
 
-    @JvmField var maxPower = 0.65
+    @JvmField var maxPower = 1.0
 
     @JvmField var atEnd = false
 

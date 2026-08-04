@@ -5,10 +5,7 @@ import java.util.Set;
 
 import org.firstinspires.ftc.teamcode.architecture.core.Module;
 
-/**
- * Composable action: a sequence of steps the {@link Actions} scheduler ticks cooperatively
- * on the OpMode thread. Construct via {@link ActionBuilder} or {@link Actions} factories.
- */
+/** Composable action ticked cooperatively by the {@link Actions} scheduler; build via {@link ActionBuilder}. */
 public final class Action {
 
     final List<Step> steps;
@@ -52,17 +49,8 @@ public final class Action {
         return cancelled;
     }
 
-    /**
-     * Marked once this Action's steps/children have been folded into another action (composed via
-     * {@code action()}, {@code sequence}, {@code parallel}, {@code race}, etc.). Such an action shares
-     * mutable Step state with its host, so scheduling it independently would corrupt both — the
-     * scheduler refuses it. Build a fresh action per use instead.
-     */
+    /** Composing one Action instance twice shares its mutable Step state (Delay start, Retry attempts), so an embedded action is refused — build a fresh one per use. */
     void markEmbedded() {
-        // Fail loud on re-composition: composing the SAME action instance into two parents (or twice
-        // into one) makes them share these mutable Step instances (Delay start time, Retry attempts,
-        // Repeat/Loop counters), so both would corrupt each other's timing. Deep-copying steps would
-        // be the alternative; failing here keeps the invariant simple — build a fresh action per use.
         if (embedded) {
             throw new IllegalStateException(
                     "Action '" + name + "' is being composed into a second action. A composed action "
@@ -100,10 +88,6 @@ public final class Action {
         completedEarly = false;
     }
 
-    /**
-     * Advance one scheduler tick. Instant steps chain within a single tick — only yield when a
-     * step returns false from {@link Step#tick}.
-     */
     boolean tick() {
         if (done || cancelled) return true;
 
@@ -124,8 +108,7 @@ public final class Action {
             }
             Step step = steps.get(currentStepIndex);
             if (!stepStarted) {
-                // No try/catch by design: a throwing step propagates out of the scheduler so a
-                // broken action surfaces as a crash instead of being silently swallowed/cancelled.
+                // No try/catch by design: a throwing step must surface as a crash, not be swallowed.
                 step.start(this);
                 stepStarted = true;
             }
@@ -144,11 +127,7 @@ public final class Action {
     public Action with(Action other) { return Actions.parallel(this, other); }
     public Action timeout(long ms) { return Actions.timeout(this, ms); }
 
-    /**
-     * Relabelled view sharing this action's (mutable) steps/targets. The source is marked embedded
-     * so only the returned copy can be scheduled — scheduling both would corrupt the shared Step
-     * state (Delay.startMs, Retry.attempts, ...).
-     */
+    /** Relabelled view sharing this action's mutable steps; marks the source embedded so only the copy is schedulable. */
     public Action withName(String newName) {
         markEmbedded();
         return new Action(steps, targets, newName);
@@ -159,10 +138,7 @@ public final class Action {
         return name + "(" + steps.size() + " steps)";
     }
 
-    /**
-     * One unit of work. {@link #start} runs once on activation, {@link #tick} is polled until
-     * true, {@link #cancel} fires if the parent action is cancelled mid-step.
-     */
+    /** One unit of work: {@link #start} runs once on activation, {@link #tick} is polled until it returns true. */
     public abstract static class Step {
         protected void start(Action parent) {}
         protected abstract boolean tick(Action parent);

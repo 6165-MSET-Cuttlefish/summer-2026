@@ -12,9 +12,7 @@ public class EdgeBooleanSupplier {
     private boolean toggleTrue;
     private boolean toggleFalse;
     private long timeMarker = 0L;
-    // Last InputClock frame this supplier refreshed on. -1 forces a refresh on first query.
-    // Replaces a write-once boolean that never reset, which froze non-pumped (combinator /
-    // threshold) suppliers after their first read.
+    // Last InputClock frame refreshed on; -1 forces a refresh on first query.
     private long lastUpdatedFrame = -1L;
 
     private long lastRisingEdgeTime = 0L;
@@ -68,9 +66,8 @@ public class EdgeBooleanSupplier {
     }
 
     public void invalidate() {
-        // Refresh eagerly so edge state advances even if this supplier isn't queried this loop, but
-        // at most once per loop: calling update() twice in one loop would advance previous=current
-        // twice and erase the edge just detected. ensureFresh() enforces the once-per-loop guard.
+        // Must go through ensureFresh(), not update(): a second update() in one loop advances
+        // previous=current again and erases the edge just detected.
         ensureFresh();
     }
 
@@ -80,10 +77,8 @@ public class EdgeBooleanSupplier {
         current = state;
         lastUpdatedFrame = InputClock.current();
         doubleClickDetected = false;
-        // Preserve toggleTrue/toggleFalse: priming suppresses spurious edges across a layer
-        // switch / re-init — it must NOT clear toggle latches the operator already set.
-        // Drop the prior rising-edge timestamp so presses across a prime gap (e.g. layer switch)
-        // don't register as a double-click.
+        // toggleTrue/toggleFalse deliberately preserved: priming must not clear operator-set latches.
+        // Dropping lastRisingEdgeTime keeps presses across a prime gap from reading as a double-click.
         lastRisingEdgeTime = 0L;
         timeMarker = System.nanoTime();
     }
@@ -149,10 +144,8 @@ public class EdgeBooleanSupplier {
                 this.booleanSupplier, this.risingDebounce / 1E9, debounce);
     }
 
-    // Combinators compose on the RAW underlying sources and let only the returned supplier own the
-    // edge/debounce state. Composing on this.getValue()/other.getValue() would re-run each operand's
-    // update() lazily and apply its debounce a second time, corrupting the combined edge timing.
-    // The returned supplier is the single edge-detector for the combination; debounce it if needed.
+    // Combinators compose on the RAW sources so only the returned supplier owns edge/debounce state;
+    // composing on getValue() would re-run each operand's update() and apply its debounce twice.
 
     public EdgeBooleanSupplier and(BooleanSupplier other) {
         return new EdgeBooleanSupplier(() -> booleanSupplier.getAsBoolean() && other.getAsBoolean());
@@ -179,7 +172,7 @@ public class EdgeBooleanSupplier {
     }
 
     public EdgeBooleanSupplier not() {
-        // Invert the raw source; rising/falling debounce swap because press/release swap.
+        // Rising/falling debounce swap because press/release swap.
         return new EdgeBooleanSupplier(
                 () -> !booleanSupplier.getAsBoolean(), fallingDebounce / 1E9, risingDebounce / 1E9);
     }

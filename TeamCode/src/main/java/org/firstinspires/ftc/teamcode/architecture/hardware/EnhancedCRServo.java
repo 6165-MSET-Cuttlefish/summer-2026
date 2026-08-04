@@ -49,7 +49,7 @@ public class EnhancedCRServo implements CRServo, PwmControl {
         }
     }
 
-    /** Bypass voltage compensation and the write cache. Test-only. */
+    /** Bypasses voltage compensation and the write cache. Test-only. */
     public void setPowerRaw(double power) {
         double corrected = cache.clamp(power);
         cache.store(corrected);
@@ -73,11 +73,7 @@ public class EnhancedCRServo implements CRServo, PwmControl {
         return cache.voltageCompensationEnabled;
     }
 
-    /**
-     * Raw device for reads or SDK calls this wrapper doesn't proxy. Writing power directly through
-     * it bypasses the write cache and leaves it stale — prefer {@link #setPower(double)}, or
-     * {@link #setPowerRaw(double)} which keeps the cache in sync.
-     */
+    /** Raw device; writing power through it bypasses the write cache and leaves it stale. */
     public CRServoImplEx getUnderlying() { return crServo; }
     public double getCachedPower() { return cache.cached; }
 
@@ -87,8 +83,7 @@ public class EnhancedCRServo implements CRServo, PwmControl {
     @Override public Direction getDirection() { return crServo.getDirection(); }
     @Override public void setDirection(Direction direction) {
         crServo.setDirection(direction);
-        // A direction flip changes what the same numeric power does; drop the cache so the next
-        // setPower always re-issues to hardware.
+        // Direction changes what the same number means, not the number; drop the cache to force a re-issue.
         cache.store(Double.NaN);
     }
 
@@ -106,8 +101,7 @@ public class EnhancedCRServo implements CRServo, PwmControl {
     @Override public void setPwmEnable() { crServo.setPwmEnable(); }
     @Override public void setPwmDisable() {
         crServo.setPwmDisable();
-        // A power write re-enables PWM on the SDK side. Drop the cache so the next setPower() to the
-        // same value actually reaches hardware and re-powers the CRServo. Mirrors setDirection().
+        // A power write re-enables PWM; drop the cache or an identical setPower() is suppressed and never re-powers the CRServo.
         cache.store(Double.NaN);
     }
     @Override public boolean isPwmEnabled() { return crServo.isPwmEnabled(); }

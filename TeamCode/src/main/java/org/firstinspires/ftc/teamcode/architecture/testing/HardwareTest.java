@@ -5,20 +5,10 @@ import com.qualcomm.robotcore.hardware.CRServo;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.Servo;
 
-/**
- * Single-device bench-test templates. Subclass, supply hardwareName(), add {@code @TeleOp}.
- *
- * <pre>{@code
- * @TeleOp(name = "Test leftClaw")
- * public class LeftClawTest extends HardwareTest.ServoPosition {
- *     @Override protected String hardwareName() { return "leftClaw"; }
- * }
- * }</pre>
- */
+/** Single-device bench-test templates: subclass one, supply hardwareName(), add {@code @TeleOp}. */
 public final class HardwareTest {
     private HardwareTest() {}
 
-    /** D-pad up/down nudges; A/B/Y snap to 0/0.5/1. */
     public abstract static class ServoPosition extends OpMode {
         protected abstract String hardwareName();
         protected double initialPosition() { return 0.5; }
@@ -50,7 +40,6 @@ public final class HardwareTest {
         }
     }
 
-    /** Left stick Y drives power; logs encoder position. */
     public abstract static class MotorPower extends OpMode {
         protected abstract String hardwareName();
         protected double maxPower() { return 1.0; }
@@ -84,7 +73,6 @@ public final class HardwareTest {
         }
     }
 
-    /** Left stick Y drives power. */
     public abstract static class CRServoPower extends OpMode {
         protected abstract String hardwareName();
         protected double maxPower() { return 1.0; }

@@ -1,10 +1,6 @@
 package org.firstinspires.ftc.teamcode.architecture.telemetry;
 
-/**
- * Renders a 2D pixel grid as Unicode Braille (U+2800..U+28FF, 2×4 pixels per glyph) in HTML
- * for the Driver Station field map. {@link #snapshot()}/{@link #restore()} let callers draw
- * a static background once and cheaply reset before each frame.
- */
+/** Renders a 2D pixel grid as Unicode Braille (U+2800..U+28FF, 2×4 pixels per glyph) in HTML for the DS field map. */
 public class FieldMapRenderer {
 
     private int width;
@@ -32,7 +28,6 @@ public class FieldMapRenderer {
         this.snapshotColors = null;
     }
 
-    /** Generic background: border + 6×6 tile grid. Game subclasses layer on top. */
     public void drawFieldLayout() {
         clear();
 
@@ -63,7 +58,6 @@ public class FieldMapRenderer {
         drawLine(px, py, endX, endY, color);
     }
 
-    /** Small marker at field coordinates (~5" diameter — game-element scale). */
     public void drawPoint(double xInches, double yInches, String color) {
         int px = toPxX(xInches);
         int py = toPxY(yInches);
@@ -231,7 +225,7 @@ public class FieldMapRenderer {
         return (char) (0x2800 + code);
     }
 
-    /** Snap x to an even pixel so it aligns with the 2-wide Braille glyph boundary. */
+    /** Snap x to an even pixel — Braille glyphs are 2 pixels wide. */
     private static int alignXToGlyph(int x) {
         return (x / 2) * 2;
     }

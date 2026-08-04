@@ -11,16 +11,7 @@ import com.pedropathing.ftc.localization.constants.PinpointConstants;
 import com.pedropathing.paths.PathConstraints;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 
-/**
- * Pedro Pathing tuning + follower factory for the <strong>DECODE robot</strong>, ported from the
- * DECODE repo's {@code architecture/auto/Constants.java}. Hardware names + offsets live in
- * {@link DecodeHardwareConfig}. Selected via {@link PedroSetup#activeRobot}; DECODE OpModes pin it
- * in {@code DecodeOpMode.createRobot()} before the follower is built.
- *
- * <p>Public statics are non-final so they appear as live-tunable on FTC Dashboard. These are the
- * DECODE-season tuned values (mass and x/y velocity were left at Pedro defaults on that robot);
- * re-tune against the real robot before trusting auto motion.
- */
+/** DECODE robot Pedro tuning; public statics are non-final so FTC Dashboard sees them as live-tunable. */
 @Config
 public final class DecodePedroSetup {
     private DecodePedroSetup() {}
@@ -32,8 +23,7 @@ public final class DecodePedroSetup {
                             0.14, 0.1973407216665132, 0.001005159209640557))
                     .centripetalScaling(0.0);
 
-    // DECODE ran voltage compensation at 11.5V nominal; xVelocity/yVelocity were left at Pedro
-    // defaults (not measured on that robot).
+    // xVelocity/yVelocity are Pedro defaults, never measured on this robot.
     public static MecanumConstants driveConstants =
             new MecanumConstants()
                     .maxPower(1.0)

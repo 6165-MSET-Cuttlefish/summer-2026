@@ -64,7 +64,6 @@ public class RobotActions {
 
     public Action shootAll(boolean resetAfterShoot, boolean firstBallDelay) {
         return Actions.builder()
-//                .set(Turret.TurretState.AUTOAIM)
                 .set(Magazine.IntakeState.OFF, Magazine.VerticalState.ON)
 
                 .setLazy(this::backShootState)
@@ -178,7 +177,7 @@ public class RobotActions {
     public Action endgameSequence() {
         endgameAction = Actions.builder()
                 .set(Endgame.InitialState.LIFT)
-                .waitUntil(() -> robot.endgame.initialLiftComplete()) // tune threshold
+                .waitUntil(() -> robot.endgame.initialLiftComplete())
                 .run(() -> {
                     robot.drivetrain.getFl().setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
                     robot.drivetrain.getFr().setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
@@ -257,10 +256,8 @@ public class RobotActions {
                             double heading = target.getHeading();
                             double distRemaining = robot.follower.getDistanceRemaining();
 
-                            // Linear decel: robot was at `velocity` at 10in out, stops at 0in
                             double currentVelocity = velocity * Math.min(1.0, distRemaining / 8.0);
 
-                            // Predict where robot center will be when shot lands
                             double predictedX = target.getX() + Math.cos(heading) * currentVelocity * robot.turret.flightTime;
                             double predictedY = target.getY() + Math.sin(heading) * currentVelocity * robot.turret.flightTime;
 
@@ -279,10 +276,8 @@ public class RobotActions {
                             double distTraveled = robot.follower.getDistanceTraveledOnPath();
 
 
-                            // Linear accel: robot starts at 0, reaches `maxVelocity` at 10in
                             double currentVelocity = maxVelocity * Math.min(1.0, distTraveled / 10.0);
 
-                            // Predict where robot center will be when shot lands
                             double predictedX = target.getX() + Math.cos(heading) * currentVelocity * robot.turret.flightTime;
                             double predictedY = target.getY() + Math.sin(heading) * currentVelocity * robot.turret.flightTime;
 

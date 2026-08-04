@@ -14,10 +14,7 @@ import org.firstinspires.ftc.teamcode.architecture.action.Action;
 import org.firstinspires.ftc.teamcode.architecture.action.Actions;
 import org.firstinspires.ftc.teamcode.architecture.core.State;
 
-/**
- * Drives a list of {@link PathActionSegment}s through a small state machine. Each {@link #update()}
- * advances by exactly one transition, so the scheduler never blocks the OpMode loop.
- */
+/** Each {@link #update()} advances by exactly one transition, so it never blocks the OpMode loop. */
 public class PathActionScheduler {
     private final Follower follower;
     private final LongSupplier clock;
@@ -30,14 +27,11 @@ public class PathActionScheduler {
     private List<Action> pendingActions = new ArrayList<>();
     private List<Action> activeDuringActions = new ArrayList<>();
 
-    // Resolved deferred-path state, captured at follow time so stopCurrentPath() can engage end-hold
-    // (or break) on a resolver segment, which has no stable PathChain to re-issue.
+    // Captured at follow time: a resolver segment has no stable PathChain for stopCurrentPath() to re-issue.
     private PathChain activeResolvedChain = null;
     private boolean activeResolvedHoldEnd = false;
-    // Armed once distance-remaining exceeds holdAtDistance, so a short path / oversized threshold
-    // can't short-circuit the drive on the first PATH_RUNNING tick.
+    // Armed once remaining exceeds holdAtDistance, so a short path can't skip the drive on tick one.
     private boolean leftHoldStart = false;
-    // holdAtDistance for a resolver segment, captured at follow time (the segment itself has none).
     private Double activeResolvedHoldAtDistance = null;
 
     private final List<Callable<Boolean>> overrideConditions = new ArrayList<>();
@@ -93,16 +87,14 @@ public class PathActionScheduler {
         currentIndex = 0;
         currentState = SchedulerState.IDLE;
         segmentStartTimeMs = 0L;
-        // Re-arm so a fired override doesn't permanently disable the scheduler; keep the config.
+        // Re-arm so a fired override doesn't permanently disable the scheduler; the config is kept.
         overrideTriggered = false;
         cancelAsyncOperations();
     }
 
     public void cancelAll() {
         cancelAsyncOperations();
-        // abort=true: a hard cancel (override/abort or OpMode stop) must stop the drivetrain in
-        // place, not re-engage Pedro's end-hold — which re-commands the path and drives to the
-        // chain end. Runs before any override callback, so a callback that redirects still wins.
+        // abort=true: a hard cancel must stop in place — re-engaging Pedro's end-hold drives to the chain end.
         stopCurrentPath(true);
         Actions.cancelAll();
     }
@@ -124,8 +116,7 @@ public class PathActionScheduler {
         if (overrideTriggered) return;
         overrideTriggered = true;
         cancelAll();
-        // Mark the run finished so getCurrentState()/skipCurrentSegment() don't report a stale
-        // PATH_RUNNING/AFTER_ACTION after the abort.
+        // Mark finished so getCurrentState()/skipCurrentSegment() don't report a stale state post-abort.
         currentState = SchedulerState.COMPLETED;
         if (overrideCallback != null) overrideCallback.run();
     }
@@ -143,8 +134,7 @@ public class PathActionScheduler {
 
         // Honor after-actions on timeout so "drive then shoot" still shoots if the drive runs long.
         if (currentState != SchedulerState.IDLE && hasTimedOut(segment)) {
-            // If after-actions are already in flight, let them finish — advancing here would
-            // cancelAsyncOperations() them mid-run, breaking the "always honor after-actions" contract.
+            // Advancing now would cancel in-flight after-actions mid-run, breaking that contract.
             if (currentState == SchedulerState.AFTER_ACTION) {
                 if (areActionsComplete()) beginWaiting(segment);
                 return;
@@ -182,8 +172,7 @@ public class PathActionScheduler {
             return;
         }
         if (shouldHoldAtDistance(segment)) {
-            // Advance without touching the follower — Pedro finishes + engages end-hold on its
-            // own, so subsequent segments overlap the final convergence and hand off cleanly.
+            // Don't touch the follower: Pedro finishes + end-holds itself, so the next segment overlaps.
             executeAfterActions(segment);
             return;
         }
@@ -246,8 +235,7 @@ public class PathActionScheduler {
             if (segment.hasResolver()) {
                 PathActionSegment.Resolved r = segment.getResolver().get();
                 chain = r.path;
-                // Merge the queued during-actions drained into the segment with the resolver's own,
-                // so actionDuring(...) before buildPathDeferred(...) still runs (CLAUDE.md contract).
+                // Merge queued during-actions so actionDuring(...) before buildPathDeferred(...) still runs.
                 during = new ArrayList<>(segment.getDuringActions());
                 during.addAll(r.duringActions);
                 holdEnd = r.holdEnd;
@@ -325,7 +313,6 @@ public class PathActionScheduler {
         PathChain chain;
         boolean holdEnd;
         if (segment.hasResolver()) {
-            // A resolver has no stable PathChain to rebuild; reuse the one captured at follow time.
             chain = activeResolvedChain;
             holdEnd = activeResolvedHoldEnd;
         } else if (segment.hasPath()) {
@@ -335,14 +322,13 @@ public class PathActionScheduler {
             return;
         }
 
-        // Re-issuing followPath(chain, true) is how we ask Pedro to engage its end-hold; otherwise
-        // stop driving outright so a timed-out/skipped segment never leaves the robot coasting.
-        // On abort, always break: re-engaging end-hold would drive the robot to the chain end.
+        // Re-issuing followPath(chain, true) is how Pedro engages end-hold; without it the robot coasts.
+        // On abort always break: re-engaging end-hold would drive to the chain end.
         if (!abort && holdEnd && chain != null) follower().followPath(chain, true);
         else follower().breakFollowing();
     }
 
-    /** Skip the current segment but still fire its after-actions (cleanup still runs). */
+    /** Skip the current segment; its after-actions still fire. */
     public void skipCurrentSegment() {
         if (overrideTriggered) return;
         PathActionSegment segment = getCurrentSegment();
@@ -394,23 +380,16 @@ public class PathActionScheduler {
     }
 
     private boolean shouldHoldAtDistance(PathActionSegment segment) {
-        // A resolver segment carries its holdAtDistance on the resolved bundle, not the segment.
         Double distance = segment.hasResolver() ? activeResolvedHoldAtDistance : segment.getHoldAtDistance();
         if (distance == null) return false;
-        // Whole-chain remaining, not the current leg: a multi-leg TrackingPathBuilder chain must not
-        // advance the state machine when only the FIRST leg is within the threshold.
+        // Whole-chain remaining, not current-leg: a multi-leg chain must not advance on the first leg alone.
         double remaining = follower().getTotalDistanceRemaining();
-        // Pedro returns -1 for a chain with DecelerationType.NONE (setNoDeceleration()); whole-chain
-        // remaining is unavailable, so fall back to current-leg remaining rather than silently
-        // disabling the early-advance (which would make the segment wait for full path completion).
+        // Pedro reports -1 for a setNoDeceleration() chain; fall back to current-leg remaining.
         if (remaining < 0) remaining = follower().getDistanceRemaining();
         if (remaining > distance) {
-            // Real distance still ahead — arm the early-advance for when we get close.
             leftHoldStart = true;
             return false;
         }
-        // Only honor the threshold once the robot has actually driven toward the end; otherwise a
-        // short path or oversized holdAtDistance would skip the drive on the first tick.
         return leftHoldStart;
     }
 
@@ -437,8 +416,6 @@ public class PathActionScheduler {
         try {
             return condition.call();
         } catch (Exception e) {
-            // Propagate (fail-fast) rather than swallowing a throwing condition into a silent
-            // "false" that reads as "not yet true" forever.
             throw new RuntimeException(e);
         }
     }

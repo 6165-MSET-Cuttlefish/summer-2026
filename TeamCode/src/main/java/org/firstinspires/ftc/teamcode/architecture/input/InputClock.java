@@ -1,11 +1,9 @@
 package org.firstinspires.ftc.teamcode.architecture.input;
 
 /**
- * Monotonic per-loop counter. {@code EnhancedOpMode} calls {@link #advance()} once at the top of
- * each init_loop/loop tick; edge suppliers key their per-loop refresh off it (see
- * {@link EdgeBooleanSupplier}) so they update exactly once per loop whether or not they're pumped
- * by a {@link LayeredGamepad}. Static so it survives Sloth hot-reload; a monotonic counter has no
- * stale-state hazard — suppliers created after a reload simply refresh on the next differing frame.
+ * Monotonic per-loop counter; {@code EnhancedOpMode} calls {@link #advance()} once per tick and edge
+ * suppliers key their once-per-loop refresh off it, whether or not a {@link LayeredGamepad} pumps them.
+ * Static by design — hot-reload safe, since a monotonic counter has no stale state.
  */
 public final class InputClock {
     private static long frame = 0;

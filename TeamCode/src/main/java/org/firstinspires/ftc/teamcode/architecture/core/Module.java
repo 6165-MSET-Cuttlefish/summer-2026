@@ -13,7 +13,6 @@ import org.firstinspires.ftc.robotcore.external.Telemetry;
 import org.firstinspires.ftc.teamcode.architecture.telemetry.DualTelemetry;
 import org.firstinspires.ftc.teamcode.architecture.action.Action;
 
-/** Base class for robot subsystem modules. */
 public abstract class Module {
     private static final int DEFAULT_HISTORY_SIZE = 50;
     private int maxHistorySize = DEFAULT_HISTORY_SIZE;
@@ -38,9 +37,7 @@ public abstract class Module {
     public Module() {
         this.name = getClass().getSimpleName();
         recomputeSectionNames();
-        // initStates() runs from EnhancedOpMode.initModules() after the subclass ctor returns,
-        // so state→module bindings aren't yet in place during the subclass ctor — use init()
-        // or initStates() for code that references registered states.
+        // State→module bindings aren't in place until initStates() runs (after this ctor returns) — reference registered states from init()/initStates(), not here.
     }
 
     private void recomputeSectionNames() {
@@ -63,11 +60,7 @@ public abstract class Module {
     protected void onStateChange() {}
     protected void onTelemetry() {}
 
-    /**
-     * Wire a State's setpoint to a live source (typically a {@code @Config static} field). The
-     * framework refreshes via {@code state.setValue(supplier.getAsDouble())} once per loop
-     * before {@link #read()}. Call after {@link #setStates(State...)} in {@link #initStates()}.
-     */
+    /** Wire a State's setpoint to a live source; refreshed once per loop before {@link #read()}. Call after {@link #setStates(State...)}. */
     protected final void bindTunable(State state, DoubleSupplier supplier) {
         Runnable refresh = () -> state.setValue(supplier.getAsDouble());
         refresh.run();
@@ -83,10 +76,7 @@ public abstract class Module {
     /** Render order in the MODULES telemetry section; lower first. */
     public int telemetryOrder() { return 0; }
 
-    /**
-     * Register the initial state for each state-class. For enums, every variant is bound to
-     * this module and reset to its initial value so a re-run starts clean.
-     */
+    /** Register the initial state per state-class. For enums, every variant is bound to this module and reset to its initial value so a re-run starts clean. */
     protected final void setStates(State... initialStates) {
         states.clear();
         stateMap.clear();
@@ -96,8 +86,7 @@ public abstract class Module {
             stateMap.put(keyOf(s), s);
 
             if (s instanceof Enum<?>) {
-                // getDeclaringClass handles enum constants with bodies (anonymous subclasses
-                // whose own getEnumConstants() returns null).
+                // getDeclaringClass handles enum constants with bodies (anonymous subclasses whose own getEnumConstants() returns null).
                 Class<?> enumClass = ((Enum<?>) s).getDeclaringClass();
                 Object[] constants = enumClass.getEnumConstants();
                 if (constants != null) {
@@ -123,10 +112,7 @@ public abstract class Module {
         throw new IllegalArgumentException("No state of type: " + stateClass.getSimpleName());
     }
 
-    /**
-     * Transition to {@code newState}. True on success/no-op; false when the state class isn't
-     * registered or a guard rejected the transition.
-     */
+    /** Transition to {@code newState}. True on success/no-op; false when the state class isn't registered or a guard rejected the transition. */
     public final boolean setState(State newState) {
         for (int i = 0; i < states.size(); i++) {
             State current = states.get(i);
@@ -154,8 +140,7 @@ public abstract class Module {
 
     public final boolean isInAny(State... checkStates) {
         for (State check : checkStates) {
-            // Look up by keyOf so enum constants with method bodies resolve to their registered
-            // slot; getState(check.getClass()) throws for those (the anonymous subclass isn't a key).
+            // keyOf, not getState(check.getClass()): the latter throws for enum constants with bodies.
             State current = stateMap.get(keyOf(check));
             if (current != null && current.equals(check)) return true;
         }
@@ -199,12 +184,7 @@ public abstract class Module {
         exitHooks.add(new StateHook(state, action));
     }
 
-    /**
-     * State-class identity key. Enum constants with method bodies report an anonymous subclass from
-     * getClass(); getDeclaringClass() returns the declared enum type that callers register and look
-     * up by. Used everywhere a state is matched to its registered slot so the read/guard/write paths
-     * agree (otherwise setState between two body-bearing constants silently no-ops).
-     */
+    /** State-class identity key: enum constants with bodies report an anonymous subclass from getClass(), so every match path must use the declared type or setState between two body-bearing constants silently no-ops. */
     @SuppressWarnings("unchecked")
     private static Class<? extends State> keyOf(State s) {
         if (s instanceof Enum<?>) {

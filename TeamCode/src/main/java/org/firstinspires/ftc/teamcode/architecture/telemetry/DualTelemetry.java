@@ -7,10 +7,7 @@ import org.firstinspires.ftc.robotcore.external.Telemetry;
 import static org.firstinspires.ftc.teamcode.architecture.telemetry.HtmlFormatter.*;
 import static org.firstinspires.ftc.teamcode.architecture.OptimizationToggles.telemetryLazyFormat;
 
-/**
- * Fan-out telemetry: every call goes to the Driver Station (HTML-formatted) and FTC Dashboard
- * (plain text). Disable either backend with the static enable flags.
- */
+/** Fan-out telemetry: the Driver Station gets HTML-formatted output, FTC Dashboard gets plain text. */
 public class DualTelemetry implements Telemetry {
     public static boolean enableDSTelemetry = true;
     public static boolean enableDashboardTelemetry = true;
@@ -20,6 +17,8 @@ public class DualTelemetry implements Telemetry {
     private int defaultFontSize = FONT_NORMAL;
     private boolean dsFormatApplied = false;
     private static final Item EMPTY_ITEM = new EnhancedItem(null, null);
+    private static final String SEPARATOR_HTML =
+            htmlColorSize(COLOR_GRAY, FONT_NORMAL, "─────────────────────────");
 
     public DualTelemetry(Telemetry dsTelemetry, Telemetry dashTelemetry) {
         this.dsTelemetry = dsTelemetry;
@@ -27,11 +26,8 @@ public class DualTelemetry implements Telemetry {
         ensureDsFormat();
     }
 
-    /**
-     * DS HTML mode is a one-shot setDisplayFormat() call, so toggling {@code enableDSTelemetry}
-     * off→on at runtime would otherwise leave raw HTML tags on the Driver Station. Re-apply it
-     * whenever DS telemetry is (re-)enabled; called each update().
-     */
+    // DS HTML mode is a one-shot setDisplayFormat(), so it must be re-applied on every off→on
+    // toggle of enableDSTelemetry or raw HTML tags show up on the Driver Station.
     private void ensureDsFormat() {
         if (enableDSTelemetry && !dsFormatApplied) {
             dsTelemetry.setDisplayFormat(DisplayFormat.HTML);
@@ -75,7 +71,7 @@ public class DualTelemetry implements Telemetry {
     }
 
     public void addSeparator() {
-        if (enableDSTelemetry) dsTelemetry.addLine(htmlColorSize(COLOR_GRAY, FONT_NORMAL, "─────────────────────────"));
+        if (enableDSTelemetry) dsTelemetry.addLine(SEPARATOR_HTML);
         if (enableDashboardTelemetry) dashTelemetry.addLine("");
     }
 

@@ -13,7 +13,7 @@ public class EnhancedServo implements Servo, PwmControl {
 
     public EnhancedServo(ServoImplEx servo) {
         this.servo = servo;
-        // Servo position range is 0..1, not -1..1 like motor power.
+        // Servo position range is 0..1, not the WriteCache default of -1..1.
         cache.min = 0.0;
         cache.max = 1.0;
     }
@@ -42,7 +42,7 @@ public class EnhancedServo implements Servo, PwmControl {
         }
     }
 
-    /** Bypass the write cache. Test-only. */
+    /** Bypasses the write cache. Test-only. */
     public void setPositionRaw(double position) {
         double corrected = cache.clamp(position);
         cache.store(corrected);
@@ -54,11 +54,7 @@ public class EnhancedServo implements Servo, PwmControl {
     }
 
     public double getCachingTolerance() { return cache.tolerance; }
-    /**
-     * Raw device for reads or SDK calls this wrapper doesn't proxy. Writing position directly
-     * through it bypasses the write cache and leaves it stale — prefer {@link #setPosition(double)},
-     * or {@link #setPositionRaw(double)} which keeps the cache in sync.
-     */
+    /** Raw device; writing position through it bypasses the write cache and leaves it stale. */
     public ServoImplEx getUnderlying() { return servo; }
     public double getCachedPosition() { return cache.cached; }
 
@@ -88,9 +84,7 @@ public class EnhancedServo implements Servo, PwmControl {
     @Override public void setPwmEnable() { servo.setPwmEnable(); }
     @Override public void setPwmDisable() {
         servo.setPwmDisable();
-        // A position write re-enables PWM on the SDK side. Drop the cache so the next setPosition()
-        // to the same value actually reaches hardware and wakes the servo, instead of being
-        // suppressed as a no-op. Mirrors setDirection().
+        // A position write re-enables PWM; drop the cache or an identical setPosition() is suppressed and never wakes the servo.
         cache.store(Double.NaN);
     }
     @Override public boolean isPwmEnabled() { return servo.isPwmEnabled(); }

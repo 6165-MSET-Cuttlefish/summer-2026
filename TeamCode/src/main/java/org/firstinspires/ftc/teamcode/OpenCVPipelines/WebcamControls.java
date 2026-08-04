@@ -31,8 +31,14 @@ public class WebcamControls {
     public static int exposureMs = 8;
     // Sensor gain in raw device units (clamped to the camera's range). Keep low to avoid washout.
     public static int gain = 0;
-    // White-balance color temperature in Kelvin (clamped to range). ~4300 keeps yellow yellow.
-    public static int whiteBalanceK = 4300;
+    // White-balance color temperature in Kelvin (clamped to range). This is what the camera
+    // assumes the room's light source is, so it can cancel that tint back out — set it LOWER than
+    // the room's actual temperature and everything reads too warm/red (the camera under-corrects);
+    // set it too high and the compensation over-corrects the other way (too cool/blue). 4300 was
+    // tuned warm for one specific venue's fluorescent lighting and reads noticeably red-shifted
+    // under cooler LED/daylight; 5500 (daylight-ish) is a more neutral default across venues. Live
+    // on FtcDashboard — nudge it to match whatever room you're actually in, no redeploy needed.
+    public static int whiteBalanceK = 5500;
 
     private final OpenCvWebcam webcam;
 

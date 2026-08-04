@@ -14,45 +14,28 @@ public final class DecodeContext {
     public static MagazineState motif = new MagazineState(GREEN, PURPLE, PURPLE);
     public static boolean usedFrontStorage = false;
 
-    // Heading is 54°; Pedro Pose headings are RADIANS, so convert. (Currently unused while Limelight
-    // is stubbed, but leaving it in degrees is a latent unit-mismatch landmine when vision returns.)
     public static final Pose redApriltagPose = new Pose(72+58.3727, 72+55.6425, Math.toRadians(54));
     public static final Pose blueApriltagPose = new Pose(72-58.3727, 72+55.6425, Math.toRadians(54));
 
     public static final Pose redTargetPose = new Pose(141.5 - 17, 144);
     public static final Pose blueTargetPose = new Pose(17, 144);
 
-    /** Turret position in field coordinates (inches). */
     public static double turretFieldX = 0;
     public static double turretFieldY = 0;
 
-    /** Target position (corrected for robot translational velocity if on). */
+    /** Aim point corrected for robot velocity when SOTM is on — not the raw goal pose. */
     public static double targetX = 0;
     public static double targetY = 0;
 
-    /** Straight-line distance from turret to (corrected) target (inches). */
     public static double distanceToGoal = 0;
 
-    /** Shot-on-the-move compensation toggles. */
     public static boolean sotmVelocity = true;
     public static boolean sotmAngle = false;
     public static boolean sotmAccel = true;
     public static double sotmAccelScale = 50;
     public static double sotmDragScale = 0.3;
 
-    /**
-     * Recomputes all shared geometric values once per loop cycle.
-     * Must be called before any module reads() that depend on these fields.
-     *
-     * <p>Called from {@code DecodeOpMode.onLoopStart()}, which the framework runs BEFORE
-     * {@code follower.update()} (so it can precede module reads that consume these fields). Pedro's
-     * getPose()/getVelocity()/getAngularVelocity() therefore return the PREVIOUS loop's cached
-     * kinematics — the shot-on-the-move corrections here lag the robot by one loop (~a few ms; sub-inch
-     * at match speeds). Accepted tradeoff, matching the DECODE-season pipeline. If SOTM precision ever
-     * needs current-loop kinematics, move {@code follower.update()} ahead of the read pass framework-wide.
-     *
-     * @param robot the current DecodeRobot instance
-     */
+    /** Must precede module reads; runs before follower.update(), so SOTM kinematics lag one loop (accepted). */
     public static void updateSharedPose(DecodeRobot robot) {
         Pose robotPose = robot.follower.getPose();
         double robotRad = robotPose.getHeading();
@@ -66,7 +49,6 @@ public final class DecodeContext {
         if (sotmVelocity) {
             double currentDistance = Math.hypot(targetX - turretFieldX, targetY - turretFieldY);
             robot.turret.flightTime = 0.00103923 * currentDistance + 0.528024;
-//            0.00103923x+0.528024
 
             Vector robotVelocity = robot.follower.getVelocity();
             double robotVx = robotVelocity.getXComponent();
@@ -77,14 +59,10 @@ public final class DecodeContext {
 
             if (sotmAccel) {
                 double[] powers = robot.drivetrain.getMotorPowers();
-                // powers = [fl, bl, br, fr]
-                // Standard mecanum decomposition:
-                //   forward (robot +X) = average of all four
-                //   strafe  (robot +Y) = fl - bl - br + fr  (left-positive)
-                double localThrustX = (powers[0] + powers[1] + powers[2] + powers[3]) / 4.0; // forward
-                double localThrustY = (powers[0] - powers[1] - powers[2] + powers[3]) / 4.0; // strafe
+                // powers = [fl, bl, br, fr]; robot +X = forward, +Y = strafe (left-positive)
+                double localThrustX = (powers[0] + powers[1] + powers[2] + powers[3]) / 4.0;
+                double localThrustY = (powers[0] - powers[1] - powers[2] + powers[3]) / 4.0;
 
-                // Rotate robot-local thrust into field space using robot heading
                 double heading = robotPose.getHeading(); // NOT negated — local→field uses +heading
                 double cos = Math.cos(heading);
                 double sin = Math.sin(heading);

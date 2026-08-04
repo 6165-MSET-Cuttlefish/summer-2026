@@ -32,12 +32,7 @@ public final class ActionBuilder {
         return this;
     }
 
-    /**
-     * Resolve states at execution time. The driven module is unknown at build time, so it is NOT
-     * added to this action's conflict targets — the scheduler can't auto-cancel actions that fight
-     * over it. If the module is known, pass it via {@link #targets(Module)} so conflict-cancellation
-     * and {@code isModuleActive()} bookkeeping still work.
-     */
+    /** Resolves states at execution time, so the driven module is NOT a conflict target — pass it to {@link #targets(Module)} if known, or nothing auto-cancels actions fighting over it. */
     @SafeVarargs
     public final ActionBuilder setLazy(Supplier<? extends State>... suppliers) {
         steps.add(new ActivateStateLazy(Arrays.asList(suppliers)));
@@ -200,10 +195,8 @@ public final class ActionBuilder {
         @Override protected boolean tick(Action parent) { return true; }
     }
 
-    // Time-based steps use System.nanoTime() (monotonic) rather than System.currentTimeMillis():
-    // the Driver Station pushes wall-clock time to the Control Hub on connect and on mid-match
-    // reconnect, so currentTimeMillis can step backward (delay never completes) or forward (delay
-    // fires early) during a match. nanoTime elapsed via subtraction is overflow-safe.
+    // nanoTime, not currentTimeMillis: the Driver Station pushes wall-clock to the Hub on connect and
+    // mid-match reconnect, so millis can step backward (delay never fires) or forward (fires early).
     private static final long MS_TO_NS = 1_000_000L;
 
     private static final class Delay extends Action.Step {
@@ -308,9 +301,8 @@ public final class ActionBuilder {
 
         @Override
         protected boolean tick(Action parent) {
-            // Tick in order and stop at the first child that terminates, so losers that haven't
-            // reached their instant step this tick don't fire it. Only a genuinely completed child
-            // (not a cancelled/errored one) is the winner.
+            // Break at the first child that terminates so losers don't fire their instant step this
+            // tick; only a genuinely completed child (not a cancelled one) wins.
             Action winner = null;
             boolean decided = false;
             for (int i = 0; i < actions.size(); i++) {

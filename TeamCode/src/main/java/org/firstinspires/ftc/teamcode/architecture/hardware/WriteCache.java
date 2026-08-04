@@ -10,12 +10,9 @@ final class WriteCache {
     boolean voltageCompensationEnabled = false;
     double referenceVoltage = 13.0;
 
-    // Below this, treat the battery reading as a sensor glitch and skip scaling. A failed Lynx
-    // bulk read can return 0 (→ divide-by-zero → Infinity → clamp to full power) or negative
-    // (→ sign flip → motor driven backwards); both are dangerous, so fall back to the raw power.
+    // A failed Lynx bulk read returns 0 (→ Infinity → full power) or negative (→ reversed); never scale on one.
     private static final double MIN_VALID_VOLTAGE = 6.0;
 
-    /** Force write on zero-crossings, fresh-rail hits, NaN, or first call. */
     boolean shouldWrite(double newValue) {
         return Math.abs(newValue - cached) > tolerance
                 || (newValue == 0.0 && cached != 0.0)
@@ -29,7 +26,6 @@ final class WriteCache {
         return Math.max(min, Math.min(max, value));
     }
 
-    /** Symmetric: scales down on a fresh pack, up on a drained one. Skips zero. */
     double applyVoltageScaling(double power) {
         if (!voltageCompensationEnabled || power == 0.0) return power;
         double measured = BatteryVoltage.get();

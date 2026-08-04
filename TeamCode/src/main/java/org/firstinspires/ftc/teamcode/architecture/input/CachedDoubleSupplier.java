@@ -4,7 +4,6 @@ import java.util.function.DoubleSupplier;
 
 public class CachedDoubleSupplier {
     private final DoubleSupplier doubleSupplier;
-    // Last InputClock frame this value was sampled on; re-reads once per loop (see EdgeBooleanSupplier).
     private long lastUpdatedFrame = -1L;
     private double current;
 
@@ -14,7 +13,6 @@ public class CachedDoubleSupplier {
     }
 
     public void invalidate() {
-        // Force the next getValue() to re-sample even within the current loop.
         lastUpdatedFrame = -1L;
     }
 

@@ -1,5 +1,6 @@
 package org.firstinspires.ftc.teamcode.decode;
 
+import com.acmerobotics.dashboard.canvas.Canvas;
 import com.acmerobotics.dashboard.config.Config;
 import com.pedropathing.geometry.Pose;
 import com.pedropathing.paths.PathChain;
@@ -21,32 +22,27 @@ public abstract class DecodeAuto extends DecodeOpMode {
 
     private PathChain lastRenderedPath = null;
     private boolean autonomousSequenceBuiltInInit = false;
-    private int visualizationLoopCounter = 0;
 
-    /**
-     * DECODE-auto-only perf knobs. Kept local (not in framework {@code OptimizationToggles}, which the
-     * summer refactor trimmed) so this port unit stays self-contained; names preserved from Decode.
-     */
-    @Config
+    @Config("AutoToggles")
     public static class AutoToggles {
         public static boolean optimizeBuildAutonomousSequenceOnceInInit = false;
-        public static boolean optimizeRenderVisualizationCadence = true;
-        public static int optimizeRenderVisualizationEveryNLoops = 2;
     }
 
-    private void renderVisualization(boolean drawPlannedPaths) {
-        if (drawPlannedPaths) {
-            PathChain currentPath = robot.pathActionScheduler.getCurrentPath();
-            if (currentPath != null) {
-                lastRenderedPath = currentPath;
-            }
-            if (lastRenderedPath != null) {
-                FieldVisualization.drawPath(robot.packet.fieldOverlay(), lastRenderedPath,
-                        currentPath != null
-                                ? FieldVisualization.COLOR_CURRENT_PATH
-                                : FieldVisualization.COLOR_PATH);
-            }
+    @Override
+    protected void dashboardOverlay(Canvas overlay) {
+        long stamp = getProfiler().enterSection();
+        PathChain currentPath = robot.pathActionScheduler.getCurrentPath();
+        if (currentPath != null) {
+            lastRenderedPath = currentPath;
         }
+        // Hold the last path through action-only segments so it doesn't blink out between drives.
+        if (lastRenderedPath != null) {
+            FieldVisualization.drawPath(overlay, lastRenderedPath, currentPath != null
+                    ? FieldVisualization.COLOR_CURRENT_PATH
+                    : FieldVisualization.COLOR_PATH);
+            FieldVisualization.drawPlannedHeading(overlay, lastRenderedPath);
+        }
+        getProfiler().leaveSection("auto.drawPath", stamp);
     }
 
     @Override
@@ -66,7 +62,6 @@ public abstract class DecodeAuto extends DecodeOpMode {
         Drivetrain.DriveState.EXTERNAL.activate();
 
         autonomousSequenceBuiltInInit = false;
-        visualizationLoopCounter = 0;
 
         startPose = getSetupPose();
         robot.follower.setPose(startPose);
@@ -92,9 +87,6 @@ public abstract class DecodeAuto extends DecodeOpMode {
             autonomousSequenceBuiltInInit = true;
         }
 
-        if (shouldRenderVisualizationThisLoop()) {
-            renderVisualization(true);
-        }
         validateStartPose();
     }
 
@@ -138,12 +130,6 @@ public abstract class DecodeAuto extends DecodeOpMode {
         robot.pathActionScheduler.update();
         getProfiler().leaveSection("auto.scheduler.update", stamp);
 
-        stamp = getProfiler().enterSection();
-        if (shouldRenderVisualizationThisLoop()) {
-            renderVisualization(true);
-        }
-        getProfiler().leaveSection("auto.renderVisualization", stamp);
-
         (robot.magazine.intakeIsFull
                 ? Magazine.HeadlightFrontState.GREEN
                 : Magazine.HeadlightFrontState.ORANGE).activate();
@@ -169,12 +155,4 @@ public abstract class DecodeAuto extends DecodeOpMode {
         }
     }
 
-    private boolean shouldRenderVisualizationThisLoop() {
-        if (!AutoToggles.optimizeRenderVisualizationCadence) {
-            return true;
-        }
-
-        int every = Math.max(1, AutoToggles.optimizeRenderVisualizationEveryNLoops);
-        return (visualizationLoopCounter++ % every) == 0;
-    }
 }

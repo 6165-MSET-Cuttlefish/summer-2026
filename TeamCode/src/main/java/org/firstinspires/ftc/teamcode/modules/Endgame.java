@@ -136,7 +136,6 @@ public class Endgame extends Module {
     private double leftInitialPosition = 0.0;
     private double rightInitialPosition = 0.0;
 
-    // Cached PID configs — only call setGains when values actually change
     private final double[] cachedLeftInitial  = nanArray(5);
     private final double[] cachedRightInitial = nanArray(5);
     private final double[] cachedLeft         = nanArray(5);
@@ -179,7 +178,7 @@ public class Endgame extends Module {
             return;
         }
 
-        // Read encoder positions exactly once per loop — reuse cached values everywhere
+        // Read the encoders once per loop; everything downstream reuses these values.
         leftInitialPosition = leftInitialEncoder.getRelativePosition();
         rightInitialPosition = -rightInitialEncoder.getRelativePosition();
 
@@ -199,7 +198,6 @@ public class Endgame extends Module {
         rightInitialPidfl.setTarget(getState(InitialState.class).getValue() + rightPidflOffset);
         rightInitialPidfl.updatePosition(rightInitialPosition);
 
-        // Cache initial lift powers with optional deceleration
         double leftInitialPower = leftInitialPidfl.calculate();
         double rightInitialPower = rightInitialPidfl.calculate();
 
@@ -213,7 +211,6 @@ public class Endgame extends Module {
         this.leftInitialPower = leftInitialPower * initialLiftConfig.leftMultiplier;
         this.rightInitialPower = -rightInitialPower * initialLiftConfig.rightMultiplier;
 
-        // Full lift PID — only run when actively lifting (avoids unnecessary I2C reads)
         if (getState(FullLiftState.class).equals(FullLiftState.FULL_LIFT)) {
             updateController(leftPidfl,  leftPidflConfig.p,  leftPidflConfig.i,  leftPidflConfig.d,  leftPidflConfig.f,  leftPidflConfig.l,  cachedLeft);
             updateController(rightPidfl, rightPidflConfig.p, rightPidflConfig.i, rightPidflConfig.d, rightPidflConfig.f, rightPidflConfig.l, cachedRight);
@@ -236,7 +233,7 @@ public class Endgame extends Module {
                 fullLiftConfig.rightPower *= rightDecelMultiplier;
             }
 
-            // Set drivetrain targets here in read() so they're applied before Drivetrain.write()
+            // Must happen in read() so the targets land before Drivetrain.write() runs.
             robot.drivetrain.setRawTargets(fullLiftConfig.leftPower, fullLiftConfig.leftPower,
                     fullLiftConfig.rightPower, fullLiftConfig.rightPower);
         }
@@ -298,7 +295,6 @@ public class Endgame extends Module {
     }
 
     public boolean initialLiftComplete() {
-        // need to retune
         return Math.abs(leftInitialPosition - getState(InitialState.class).getValue()) < 70 &&
                 Math.abs(rightInitialPosition - getState(InitialState.class).getValue()) < 70;
     }
@@ -310,13 +306,11 @@ public class Endgame extends Module {
     protected void onTelemetry() {
         if (endgameTelemetry.TOGGLE) {
 
-            // Full lift state and motor positions
             logDashboard("Full Lift State", getState(FullLiftState.class));
             log("FL Position (ticks)", robot.drivetrain.getFl().getCurrentPosition());
             log("FR Position (ticks)", robot.drivetrain.getFr().getCurrentPosition());
             logDashboard("Full Lift Target", "%.1f", fullLiftTargetPosition);
 
-            // Full lift PID telemetry
             logDashboard("Left PID Power", "%.3f", leftPidfl.calculate());
             logDashboard("Right PID Power", "%.3f", rightPidfl.calculate());
             logDashboard("Left PID Error", "%.3f", leftPidfl.getError());
