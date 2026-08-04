@@ -16,25 +16,54 @@ import org.opencv.imgproc.Imgproc;
 import org.openftc.easyopencv.OpenCvPipeline;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 
 /**
- * ARCHITECTURE NOTE (refactor):
+ * ARCHITECTURE NOTE (shape-based detection refactor):
  *
- * The homography is now used ONLY to transform individual detected ball
- * points into field-coordinate inches. The full camera frame is never
- * warped. This preserves the camera's full field of view and detects balls
- * at any distance, instead of being limited to whatever area the warped
- * top-down view used to cover.
+ * DETECTION STRATEGY CHANGED from color-blob segmentation to curve/edge-based
+ * circle fitting (Hough Circle Transform). Here's the difference and why it
+ * was made:
  *
- * Trade-off this introduces: in the old warped-image approach, a ball's
- * apparent pixel size was constant no matter how far away it was (that's
- * the whole point of a top-down projection). In the raw camera frame, a
- * ball's apparent pixel size shrinks with distance — there is no single
- * "expected ball radius in pixels" anymore. All shape/size validation below
- * has been redesigned to be SCALE-INVARIANT (relative roundness ratios and
- * frame-area fractions) rather than relying on a fixed expected pixel size,
- * so detection still works whether a ball is close to the camera or far away.
+ * OLD (color-first): threshold HSV for "yellow-ish" pixels -> morphologically
+ * CLOSE that mask aggressively to bridge every hole/glare gap into one solid
+ * blob per ball -> distance-transform + watershed to split touching balls ->
+ * validate the resulting blob's shape (area/circularity/roundness) as a
+ * downstream filter. Every step depends on the color mask being close to a
+ * solid disc FIRST. If a ball's surface is broken up badly enough by holes +
+ * glare + shadow that no amount of closing bridges it into one blob, the ball
+ * is invisible to everything downstream — color segmentation was the
+ * bottleneck, and "is this actually round" was only ever checked AFTER a
+ * blob already existed.
+ *
+ * NEW (shape-first): cv::HoughCircles searches directly for GRADIENT edges
+ * whose curvature is consistent with a circle of some radius, independent of
+ * what color or brightness sits inside that boundary. A hole punched in the
+ * ball has its own strong edge, but that edge's curvature doesn't match the
+ * ball's actual outer radius, so it doesn't vote for the ball's true center.
+ * Glare is similarly irrelevant — it's just interior texture; Hough is
+ * looking at the ball's outer silhouette against the (differently colored)
+ * background, not at what's happening inside that boundary. This means a
+ * ball can be found even when its visible surface is mostly broken up by
+ * holes/glare/shadow, as long as its outer edge against the background is a
+ * clean, mostly-unbroken curve.
+ *
+ * The yellow-color HSV mask is NOT gone — it's now used only as a coarse,
+ * cheap ROI (region-of-interest) filter: find rough clusters of yellow-ish
+ * pixels, pad them out generously, and run HoughCircles ONLY inside those
+ * small regions. This keeps performance reasonable (HoughCircles over a
+ * full 640x480 frame is expensive) while getting the robustness of curve
+ * fitting for the actual circle detection.
+ *
+ * WHAT THIS ELIMINATES: distance transform, watershed, the native
+ * marker-building chain, connected-components labeling, and the separate
+ * post-hoc area/circularity/roundness validation. HoughCircles solves what
+ * all of that machinery existed for — splitting touching balls (each circle
+ * is found independently, so touching balls naturally separate) and
+ * validating "is this actually round" (built into the algorithm, not a
+ * downstream filter) — in one native call per ROI.
  */
 public class SampleDetectionPipeline extends OpenCvPipeline {
 
@@ -48,11 +77,12 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
     // DISPLAY MODE — all modes draw on the ORIGINAL (unwarped) camera frame,
     // preserving full field of view.
     //
-    //   MASK    — binary detection mask (white = yellow detected) at full
-    //             camera resolution, with contour/center/contact overlays.
-    //             Useful for tuning HSV thresholds and morphology.
+    //   MASK    — the coarse yellow ROI mask (white = candidate region) at
+    //             full camera resolution, with circle/center/contact
+    //             overlays. Useful for tuning HSV thresholds and seeing
+    //             which regions Hough actually searched.
     //
-    //   OVERLAY — full-color camera image with contour outline + center dot +
+    //   OVERLAY — full-color camera image with circle outline + center dot +
     //             contact dot overlays. Useful for verifying detections
     //             against the real scene.
     //
@@ -62,25 +92,12 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
     //             coordinates. Best for a clean, presentation-style view.
     // -------------------------------------------------------------------------
     public enum DisplayMode { MASK, OVERLAY, BOX }
-    private static final DisplayMode DISPLAY_MODE = DisplayMode.BOX; // ← change here
+    private static final DisplayMode DISPLAY_MODE = DisplayMode.MASK; // ← change here
 
     // -------------------------------------------------------------------------
-    // QUICK FIX APPLIED: every reported distance was exactly 2x too large.
-    // The matrix below is the original H_ARRAY pre-multiplied by the scale
-    // matrix diag(0.5, 0.5, 1) — i.e. S * H, where S halves only the output
-    // (x, y) rows and leaves the bottom projective row untouched. This is the
-    // mathematically correct way to halve every output distance; naively
-    // dividing all 9 raw entries by 2 would also incorrectly scale the
-    // perspective terms in the bottom row and break the transform.
-    //
-    // This patches the symptom, not the root cause. The original matrix was
-    // itself a manual pixel-to-inch conversion of an older pipeline's output
-    // (see the derivation note that used to be here) — that conversion is
-    // where the 2x almost certainly crept in. If distances drift off again
-    // after any recalibration, redo this scale correction, or better, run
-    // live calibration once (USE_PREDETERMINED_HOMOGRAPHY = false) to get a
-    // matrix computed directly by this pipeline with no manual conversion
-    // step at all.
+    // Homography matrix mapping full-resolution image pixels directly to
+    // field-coordinate inches. See buildCalibrationDstCorners() for how the
+    // calibration destination points are defined.
     // -------------------------------------------------------------------------
     private static final double[][] H_ARRAY = {
             { -1.7797474624e-01, -5.3062009235e-02,  6.0413594965e+01 },
@@ -89,99 +106,136 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
     };
 
     // -------------------------------------------------------------------------
-    // Detection downscale factor.
-    //
-    // PERFORMANCE: this is the single biggest lever in the whole pipeline.
-    // HSV conversion, all three morphology passes, the distance transform,
-    // and the per-pixel Java loop that builds the watershed markers mat all
-    // scale with the NUMBER OF PIXELS processed, which scales with the SQUARE
-    // of this factor (half the linear scale = quarter the pixels = ~4x faster
-    // on every one of those steps). At 1.0 (full 640x480 camera resolution)
-    // this is by far the largest contributor to a ~1000ms frame time.
-    //
-    // 0.5 processes ~4x fewer pixels than 1.0 and is a safe starting point —
-    // ball detection accuracy is largely unaffected because the shape/size
-    // checks later in the pipeline are scale-invariant (fractions of frame
-    // area, not fixed pixel counts). Detected points are scaled back up to
-    // full resolution before being transformed by the homography, so
-    // reported field coordinates are not affected by this value at all.
-    //
-    // Lower further (e.g. 0.35) for more speed if 0.5 isn't enough; raise
-    // toward 1.0 only if small/distant balls stop being detected reliably.
-    //
-    // Dropped to 0.35 for velocity/tracking use: at 0.5 this was measuring ~570ms/frame (well
-    // before the ROI-sizing bug fix above, which was the bigger cost — this is a second,
-    // independent lever on top of that fix). Trade-off: MIN_SEED_SEPARATION_PX (12px) is a fixed
-    // pixel distance, so at a lower scale it represents a larger fraction of the frame — balls
-    // sitting very close together are more likely to merge into one seed. Raise back toward 0.5
-    // if that shows up in practice.
+    // Detection downscale factor. Still the single biggest performance lever:
+    // ROI-finding (HSV threshold + light morphology) scales with pixel count,
+    // and a smaller frame means smaller (cheaper) Hough search regions too.
+    // Detected points are scaled back to full resolution before being
+    // transformed by the homography, so reported field coordinates are
+    // unaffected by this value.
     // -------------------------------------------------------------------------
-    private static final double DETECTION_SCALE = 0.35;
+    private static final double DETECTION_SCALE = 0.5;
 
     // -------------------------------------------------------------------------
-    // Yellow ball HSV range.
+    // Yellow ball HSV range, used ONLY to find coarse candidate ROIs now —
+    // NOT required to produce one clean solid blob per ball anymore. This can
+    // stay reasonably loose/generous since Hough does the real shape
+    // validation; the color mask's only job is "is there probably a ball
+    // somewhere around here" so Hough has a small region to search instead
+    // of the whole frame.
     // -------------------------------------------------------------------------
-    private static final Scalar YELLOW_LOW  = new Scalar(15, 120, 120);
+    private static final Scalar YELLOW_LOW  = new Scalar(15, 100, 100);
     private static final Scalar YELLOW_HIGH = new Scalar(34, 255, 255);
+    private static final Scalar GLARE_LOW   = new Scalar(15,   0, 200);
+    private static final Scalar GLARE_HIGH  = new Scalar(34,  90, 255);
 
     // -------------------------------------------------------------------------
-    // Morphology kernels.
+    // ROI-finding morphology. Deliberately LIGHT compared to the old
+    // pipeline's aggressive multi-pass closing — this only needs to merge a
+    // few nearby fragments into a rough cluster, not bridge an entire ball's
+    // hole pattern into one solid disc. Over-closing here just wastes time;
+    // Hough doesn't need (or benefit from) a solid blob.
     // -------------------------------------------------------------------------
-    private static final Mat CLOSE_KERNEL = Imgproc.getStructuringElement(
-            Imgproc.MORPH_ELLIPSE, new Size(5, 5));
-    // Fills internal dimple-pattern holes within a SINGLE ball's blob. Kept
-    // small on purpose: at 35x35 this was wide enough to also bridge the
-    // (often very thin) dark gap between two balls that are touching or
-    // nearly touching, fusing the whole cluster into one undetectable blob.
-    private static final Mat FILL_KERNEL  = Imgproc.getStructuringElement(
-            Imgproc.MORPH_ELLIPSE, new Size(15, 15));
-    // Extra hole-filling pass: dilate aggressively then erode back to recover
-    // shape. Kept SMALL (smaller than CLOSE_KERNEL's effective close) on
-    // purpose — this only needs to bridge a thin notch/gap within a single
-    // ball's blob (glare, dimple pattern). If it's too large it will also
-    // bridge the dark gap between two separate adjacent balls, fusing them
-    // into one connected blob before watershed gets a chance to seed them.
-    private static final Mat HOLE_KERNEL  = Imgproc.getStructuringElement(
-            Imgproc.MORPH_ELLIPSE, new Size(7, 7));
+    private static final Mat ROI_CLOSE_KERNEL = Imgproc.getStructuringElement(
+            Imgproc.MORPH_ELLIPSE, new Size(9, 9));
+
+    // How much to pad each color-cluster's bounding box (in scaled pixels)
+    // when turning it into a Hough search ROI. Generous padding matters more
+    // here than in the old pipeline, because a ball's outer silhouette often
+    // extends beyond where the color mask itself lit up (e.g. a thin sliver
+    // of yellow near the edge, or a mostly-glare-washed near side).
+    private static final int ROI_PAD_PX = 14;
+
+    // Nearby candidate ROIs (within this many scaled pixels of each other)
+    // are merged into one larger search region before running Hough, so a
+    // single ball whose color mask fragmented into several disconnected
+    // blobs still gets ONE combined ROI instead of several overlapping ones.
+    private static final int ROI_MERGE_DIST_PX = 20;
 
     // -------------------------------------------------------------------------
-    // Local-maximum neighborhood for watershed seeds.
+    // Hough Circle Transform parameters. All radius bounds are expressed as a
+    // FRACTION of the frame's shorter dimension, keeping them scale-invariant
+    // with respect to DETECTION_SCALE and camera resolution — the same
+    // scale-invariance philosophy the old pipeline used for area fractions.
     // -------------------------------------------------------------------------
-    private static final Mat LOCAL_MAX_KERNEL = Imgproc.getStructuringElement(
-            Imgproc.MORPH_ELLIPSE, new Size(15, 15));
 
-    private static final double MIN_SEED_DEPTH_PX = 2.0;
+    // Gaussian blur kernel applied before Hough — circle detection is
+    // sensitive to pixel-level noise, and holes/glare are exactly the kind
+    // of high-frequency noise this needs to smooth over before edge/gradient
+    // analysis runs. Applied per-ROI AFTER the upscale below, not to the whole
+    // small frame: a 5x5 blur erases the entire edge of a 3-5px-radius ball,
+    // which is exactly the size a distant ball occupies at DETECTION_SCALE.
+    private static final Size HOUGH_BLUR_KERNEL = new Size(5, 5);
 
-    // Background owns label 1, so connected-component seed labels (which start at 1) are shifted
-    // up by one to keep clear of it.
-    private static final int WS_BACKGROUND_LABEL  = 1;
-    private static final int WS_SEED_LABEL_OFFSET = 1;
+    // dp: inverse ratio of accumulator resolution to image resolution. 1.0 =
+    // accumulator has the same resolution as the input ROI (most precise,
+    // more compute). Raise toward 1.5–2.0 if Hough becomes a bottleneck.
+    private static final double HOUGH_DP = 1.2;
 
-    // -------------------------------------------------------------------------
-    // Final per-region validation.
-    //
-    // CIRCULARITY / ROUNDNESS are intentionally lenient: a real ball whose
-    // mask has a notch (glare, dimple pattern, or a neighboring ball's shadow
-    // biting into the top of the blob) will score lower than a perfect circle
-    // even after the HOLE_KERNEL closing pass above. Instead of requiring a
-    // near-perfect circle, we accept anything "close enough" — a small notch
-    // should not disqualify an otherwise round, correctly-sized blob.
-    // -------------------------------------------------------------------------
-    private static final double MIN_AREA_FRACTION = 0.0001;
-    // Was 1 (100% of frame), which silently disabled the "too large to be a ball" rejection
-    // entirely (nothing can ever exceed the whole frame) and, via the ROI-pad math below, made
-    // every candidate's processing ROI the entire frame too. 0.15 still comfortably admits a ball
-    // right up against the lens while actually rejecting frame-filling glare/lighting blobs.
-    private static final double MAX_AREA_FRACTION = 0.15;
-    private static final double MIN_CIRCULARITY = 0.25;
-    private static final double MIN_ROUNDNESS_RATIO = 0.30;
-    private static final double MIN_SEED_SEPARATION_PX = 12.0;
-    // Independent of MAX_AREA_FRACTION on purpose: that constant stays generous for the
-    // accept/reject check, but reusing it here (as this used to) sizes every per-candidate ROI
-    // off a "ball could be up to 15% of the frame" bound, which is still ~full-frame at this
-    // detection resolution. This bound only controls how big a crop we search around each seed,
-    // so it can — and should — be much tighter than the rejection ceiling.
-    private static final double ROI_MAX_BALL_AREA_FRACTION = 0.02;
+    // Minimum distance between detected circle centers, in pixels within the
+    // ROI. Prevents multiple overlapping detections of the same ball's edge.
+    // Derived from expected ball radius at runtime (see runDetectionFrame).
+    private static final double HOUGH_MIN_DIST_FRACTION = 0.5; // * expected radius
+
+    // Canny high threshold used internally by Hough for edge detection. The
+    // low threshold is automatically half of this. Lower = more sensitive to
+    // weak edges (catches faint ball outlines against low-contrast
+    // backgrounds) but noisier; higher = only very strong edges vote.
+    private static final double HOUGH_CANNY_THRESHOLD = 80;
+
+    // Floor for the above once it has been divided down for an upscaled ROI
+    // (see ROI_MAX_UPSCALE) — below this, sensor noise starts producing edges.
+    private static final double HOUGH_CANNY_MIN_THRESHOLD = 30;
+
+    // Accumulator vote threshold — how many edge-gradient votes a candidate
+    // circle needs to be reported. LOWER finds more circles (including
+    // false positives on strongly-textured non-ball regions); HIGHER is
+    // stricter. Kept fairly low because ROIs are already color-pre-filtered,
+    // so false positives here mostly cost a little compute, not accuracy.
+    private static final double HOUGH_ACCUMULATOR_THRESHOLD = 22;
+
+    // Upper bound on a searched circle relative to the ROI's own shorter
+    // dimension — a circle can't meaningfully exceed the region it was found
+    // in. This is only ever the tighter half of a min() against the absolute
+    // ceiling below.
+    private static final double HOUGH_MAX_RADIUS_FRACTION = 0.60;
+
+    // Ball radius bounds as a fraction of the FRAME's shorter dimension.
+    // These are deliberately NOT ROI-relative: ROI size has a hard floor of
+    // 2 * ROI_PAD_PX regardless of how small the ball is, so a ROI-relative
+    // minimum can never shrink below ~5px and silently excludes every distant
+    // ball. Set MIN from the smallest apparent ball at the camera's furthest
+    // useful range, MAX from the largest at its closest.
+    private static final double MIN_BALL_RADIUS_FRAME_FRACTION = 0.02;
+    private static final double MAX_BALL_RADIUS_FRAME_FRACTION = 0.1;
+
+    // A distant ball is only a few pixels across at DETECTION_SCALE, and
+    // Hough's accumulator votes scale with circumference — a 4px-radius circle
+    // has ~25 edge pixels total to clear HOUGH_ACCUMULATOR_THRESHOLD with,
+    // while a near ball clears it trivially. ROIs whose smallest searched
+    // radius falls under this are upscaled before the Hough call so tiny
+    // circles get a proportionate number of votes.
+    private static final double HOUGH_WORKING_MIN_RADIUS_PX = 6.0;
+
+    // Bounds the cost of the above; Hough is O(pixels), so an unbounded
+    // upscale on a large ROI would be the whole frame's budget.
+    private static final double ROI_MAX_UPSCALE = 4.0;
+
+    // Fraction of a detected circle's own area that must be yellow-mask pixels
+    // for it to count as a ball. ROIs are padded and merged, so they always
+    // contain non-yellow margin, and HOUGH_GRADIENT votes along the gradient
+    // normal in BOTH directions — a real ball's edge therefore also deposits a
+    // phantom center about one radius out into the dark background. Without
+    // this check nothing downstream distinguishes that phantom from the ball.
+    // Kept low: holes, glare and shadow mean a real ball is never fully masked.
+    private static final double MIN_YELLOW_FILL_FRACTION = 0.30;
+
+    // Two kept circles must be separated by at least this fraction of the sum
+    // of their radii. Hough's own minDist can't do this job: it is one value
+    // per call, derived from the SMALLEST searched radius (~3px), so it cannot
+    // suppress a second detection on a ball many times that size — and it does
+    // nothing at all across separate ROI calls. Balls resting against each
+    // other sit at 1.0 (dist == r1 + r2), so this must stay well under that.
+    private static final double MIN_CENTER_SEPARATION_FRACTION = 0.7;
 
     // -------------------------------------------------------------------------
     // Homography calibration settings — GRID_COLS=9, GRID_ROWS=6 matches the
@@ -190,32 +244,6 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
     private static final int   GRID_COLS        = 9;
     private static final int   GRID_ROWS        = 6;
     private static final int   EXPECTED_CORNERS = GRID_COLS * GRID_ROWS;
-    // -------------------------------------------------------------------------
-    // Physical size of ONE chessboard square, in inches. This is the single
-    // source of truth for the scale of every distance the pipeline reports —
-    // it directly defines what "1 unit" means in the calibration destination
-    // grid (see buildCalibrationDstCorners() below), so an error here produces
-    // a uniform, constant-factor error in every single reported coordinate.
-    //
-    // If every reported distance is consistently OFF BY A FIXED MULTIPLE
-    // (e.g. exactly 2x too large, or exactly 2x too small), the almost
-    // certain cause is this constant not matching your PHYSICAL PRINTED
-    // board — not a bug in the transform math. Measure an actual square
-    // on the printed board with a ruler (not the pattern's nominal/intended
-    // size, since printers/PDF scaling can shrink or enlarge it) and set
-    // this to that measured value.
-    //
-    //   distances doubled  -> this constant is HALF of the true square size
-    //                         -> multiply it by 2
-    //   distances halved   -> this constant is DOUBLE the true square size
-    //                         -> divide it by 2
-    //
-    // IMPORTANT: after changing this value you MUST re-run live calibration
-    // (USE_PREDETERMINED_HOMOGRAPHY = false) and re-copy the resulting
-    // H_ARRAY from telemetry. Simply editing this constant does NOT retroactively
-    // fix a homography matrix that was already computed/copied using the old
-    // value — the old H_ARRAY has the wrong scale baked into it permanently.
-    // -------------------------------------------------------------------------
     private static final float SQUARE_SIZE_INCHES = 1.0f; // TODO: verify against your physical board
     private static final int   DETECTION_FRAME_INTERVAL = 3;
     private static final int   FRAMES_TO_CONFIRM = 5;
@@ -225,60 +253,33 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
     // -------------------------------------------------------------------------
     private enum Phase { CALIBRATING, DETECTING }
 
-    // volatile: written on the camera thread (processFrame), read on the OpMode thread (getHomography /
-    // isCalibrated / getHomographyAsString).
+    // volatile: written on the camera thread (processFrame), read on the OpMode thread.
     private volatile Phase phase;
     private volatile Mat   homography   = null;
     private int   confirmCount = 0;
     private int   frameCount   = 0;
 
-    private final Mat gray         = new Mat();
-    private final Mat small        = new Mat();
+    private final Mat gray         = new Mat(); // full-res grayscale, calibration only
+    private final Mat small        = new Mat(); // downscaled color frame
+    private final Mat smallGray    = new Mat(); // downscaled grayscale, unblurred
+    private final Mat roiWork      = new Mat(); // per-ROI upscaled + blurred, fed to Hough
     private final Mat hsv          = new Mat();
     private final Mat yellowMask   = new Mat();
-    private final Mat cleanMask    = new Mat();
-    private final Mat filledMask   = new Mat();
-    private final Mat holeFilled   = new Mat();
-    private final Mat distMat      = new Mat();
+    private final Mat glareMask    = new Mat();
+    private final Mat roiMask      = new Mat(); // lightly-closed candidate mask
     private final Mat displayImage = new Mat();
-    // Reused findContours hierarchy output — was a per-seed `new Mat()` that leaked every frame.
+    private final Mat upscaledMask = new Mat();
+    // findContours hierarchy output, reused across frames.
     private final Mat contourHierarchy = new Mat();
-    // Watershed-seeding scratch space, likewise reused across frames instead of `new Mat()` per
-    // frame — OpenCV's out-param calls (dilate/compare/convertTo/connectedComponentsWithStats)
-    // all auto-resize their destination Mat via create(), so reuse here is safe and free.
-    private final Mat dilated       = new Mat();
-    private final Mat isPeak        = new Mat();
-    private final Mat deepEnough    = new Mat();
-    private final Mat seedMask      = new Mat();
-    private final Mat ccLabels      = new Mat();
-    private final Mat ccStats       = new Mat();
-    private final Mat ccCentroids   = new Mat();
-    private final Mat freshMarkers  = new Mat();
-    private final Mat upscaledMask  = new Mat();
-    // watershed() hard-asserts CV_8UC3 and aborts the process (not a catchable exception) on
-    // mismatch. EasyOpenCV hands processFrame() an RGBA (4-channel) Mat, so `small` — a plain
-    // resize of `input` — is 4-channel too; watershedSrc is the 3-channel conversion watershed
-    // actually needs.
-    private final Mat watershedSrc  = new Mat();
 
     private final MatOfPoint2f dstCorners;
 
     private final Telemetry telemetry;
 
     private static class BallResult {
-        MatOfPoint contourSmall;
-        Point centerSmall;
-        Point contactSmall;
-        Point fieldPoint;
-    }
-
-    private static class CandidateStats {
-        Point seedSmall;
-        double areaFraction;
-        double circularity;
-        double roundness;
-        String rejectReason;
-        int ballIndex = -1;
+        double centerXSmall, centerYSmall;   // Hough circle center, small-image space
+        double radiusSmall;                   // Hough circle radius, small-image space
+        Point fieldPoint;                     // ground-contact point, transformed to inches
     }
 
     // =========================================================================
@@ -334,7 +335,7 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
     }
 
     // =========================================================================
-    // PHASE 1 — Homography calibration
+    // PHASE 1 — Homography calibration (unchanged from prior version)
     // =========================================================================
 
     private Mat runCalibrationFrame(Mat input) {
@@ -367,7 +368,6 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
             return input;
         }
 
-        // Release the homography we're superseding so calibration frames don't leak one each.
         Mat previousHomography = homography;
         homography = h;
         if (previousHomography != null && previousHomography != h) previousHomography.release();
@@ -390,7 +390,7 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
     }
 
     // =========================================================================
-    // PHASE 2 — Ball detection
+    // PHASE 2 — Ball detection via color-filtered ROIs + Hough circle fitting
     // =========================================================================
 
     private Mat runDetectionFrame(Mat input) {
@@ -398,253 +398,113 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
         Size smallSize = new Size(input.cols() * DETECTION_SCALE, input.rows() * DETECTION_SCALE);
         Imgproc.resize(input, small, smallSize, 0, 0, Imgproc.INTER_AREA);
 
+        // --- Step 1: coarse color-based ROI candidates -------------------------
         Imgproc.cvtColor(small, hsv, Imgproc.COLOR_RGB2HSV);
         Core.inRange(hsv, YELLOW_LOW, YELLOW_HIGH, yellowMask);
+        Core.inRange(hsv, GLARE_LOW, GLARE_HIGH, glareMask);
+        Core.bitwise_or(yellowMask, glareMask, yellowMask);
 
-        Imgproc.morphologyEx(yellowMask, cleanMask,  Imgproc.MORPH_CLOSE, CLOSE_KERNEL);
-        Imgproc.morphologyEx(cleanMask,  filledMask, Imgproc.MORPH_CLOSE, FILL_KERNEL);
+        // Light closing only — just enough to merge nearby fragments of the
+        // SAME ball into one rough cluster. Not trying to produce a solid disc.
+        Imgproc.morphologyEx(yellowMask, roiMask, Imgproc.MORPH_CLOSE, ROI_CLOSE_KERNEL);
 
-        // Extra hole-filling pass: notches/gaps at the top of a ball (e.g. from
-        // glare or the dimple pattern breaking up the yellow detection) leave
-        // a non-convex bite in the blob. A small close (dilate -> erode) seals
-        // those notches without bridging the gap to a neighboring ball, which
-        // would otherwise fuse separate balls into one undetectable blob.
-        Imgproc.morphologyEx(filledMask, holeFilled, Imgproc.MORPH_CLOSE, HOLE_KERNEL);
+        // --- Step 2: build merged ROI rectangles from color clusters -----------
+        List<Rect> rois = findMergedRois(roiMask);
 
-        // PERFORMANCE: only copy the full-resolution input when it will
-        // actually be used. MASK mode overwrites displayImage entirely a few
-        // lines below, so copying `input` into it here was wasted work.
+        // --- Step 3: grayscale once for the whole small frame, reused as the
+        //             source for every ROI's Hough search -------------------
+        Imgproc.cvtColor(small, smallGray, Imgproc.COLOR_RGB2GRAY);
+
         if (DISPLAY_MODE != DisplayMode.MASK) {
             input.copyTo(displayImage);
         }
 
-        List<BallResult> results = new ArrayList<>();
-        List<CandidateStats> candidates = new ArrayList<>();
-        int rawSeedCount = 0;
+        List<BallResult> candidates = new ArrayList<>();
+        int rejectedCount = 0;
 
-        if (Core.countNonZero(holeFilled) > 0) {
+        double frameShortSide  = Math.min(small.cols(), small.rows());
+        double minBallRadiusSmall = frameShortSide * MIN_BALL_RADIUS_FRAME_FRACTION;
+        double maxBallRadiusSmall = frameShortSide * MAX_BALL_RADIUS_FRAME_FRACTION;
 
-            Imgproc.distanceTransform(holeFilled, distMat, Imgproc.DIST_L2, 3);
+        // --- Step 4: run HoughCircles within each candidate ROI -----------------
+        for (Rect roi : rois) {
+            int shortSide = Math.min(roi.width, roi.height);
+            if (shortSide < 4) continue; // too small to meaningfully search
 
-            Imgproc.dilate(distMat, dilated, LOCAL_MAX_KERNEL);
-            Core.compare(distMat, dilated, isPeak, Core.CMP_EQ);
+            double maxRadius = Math.min(shortSide * HOUGH_MAX_RADIUS_FRACTION, maxBallRadiusSmall);
+            double minRadius = Math.min(minBallRadiusSmall, maxRadius * 0.5);
+            double minDist   = Math.max(4.0, minRadius * HOUGH_MIN_DIST_FRACTION * 2.0);
 
-            Core.compare(distMat, new Scalar(MIN_SEED_DEPTH_PX), deepEnough, Core.CMP_GE);
-            Core.bitwise_and(isPeak, deepEnough, isPeak);
+            double roiScale = Math.min(ROI_MAX_UPSCALE,
+                    Math.max(1.0, HOUGH_WORKING_MIN_RADIUS_PX / minRadius));
 
-            isPeak.convertTo(seedMask, CvType.CV_8U);
+            // Interpolation spreads the same intensity step across roiScale
+            // pixels, so per-pixel gradient magnitude drops by roughly that
+            // factor — a fixed Canny threshold would reject the very edges the
+            // upscale exists to recover.
+            double cannyThreshold = Math.max(HOUGH_CANNY_MIN_THRESHOLD,
+                    HOUGH_CANNY_THRESHOLD / roiScale);
 
-            int numLabels = Imgproc.connectedComponentsWithStats(seedMask, ccLabels, ccStats,
-                    ccCentroids, 8, CvType.CV_32S);
-
-            List<double[]> seedCenters = new ArrayList<>();
-            rawSeedCount = Math.max(0, numLabels - 1);
-            for (int lbl = 1; lbl < numLabels; lbl++) {
-                double cx = ccCentroids.get(lbl, 0)[0];
-                double cy = ccCentroids.get(lbl, 1)[0];
-                boolean merged = false;
-                for (double[] existing : seedCenters) {
-                    double dx = cx - existing[0], dy = cy - existing[1];
-                    if (Math.sqrt(dx * dx + dy * dy) < MIN_SEED_SEPARATION_PX) {
-                        merged = true;
-                        break;
-                    }
+            Mat roiGray = smallGray.submat(roi);
+            Mat circles = new Mat();
+            try {
+                if (roiScale > 1.0) {
+                    Imgproc.resize(roiGray, roiWork,
+                            new Size(Math.round(roi.width * roiScale),
+                                     Math.round(roi.height * roiScale)),
+                            0, 0, Imgproc.INTER_LINEAR);
+                } else {
+                    roiGray.copyTo(roiWork); // submat is a view; don't blur smallGray in place
                 }
-                if (!merged) seedCenters.add(new double[]{cx, cy, lbl});
-            }
+                Imgproc.GaussianBlur(roiWork, roiWork, HOUGH_BLUR_KERNEL, 0);
 
-            if (!seedCenters.isEmpty()) {
-                int rows = holeFilled.rows(), cols = holeFilled.cols();
-                byte[] filledRow = new byte[cols];
-                int[]  labelRow  = new int[cols];
-                int[]  markerRow = new int[cols];
-                freshMarkers.create(rows, cols, CvType.CV_32SC1);
+                Imgproc.HoughCircles(roiWork, circles, Imgproc.HOUGH_GRADIENT,
+                        HOUGH_DP, minDist * roiScale,
+                        cannyThreshold, HOUGH_ACCUMULATOR_THRESHOLD,
+                        (int) (minRadius * roiScale), (int) (maxRadius * roiScale));
 
-                // watershed reads 0 as "unknown, flood me" and resets negative input markers to 0 as
-                // well, so background MUST carry its own positive label — otherwise the seeds have
-                // nothing to flood against and each one expands to fill the entire frame.
-                for (int row = 0; row < rows; row++) {
-                    holeFilled.get(row, 0, filledRow);
-                    ccLabels.get(row, 0, labelRow);
-                    for (int col = 0; col < cols; col++) {
-                        if (filledRow[col] == 0) {
-                            markerRow[col] = WS_BACKGROUND_LABEL;
-                        } else if (labelRow[col] > 0) {
-                            markerRow[col] = labelRow[col] + WS_SEED_LABEL_OFFSET;
-                        } else {
-                            markerRow[col] = 0;
-                        }
-                    }
-                    freshMarkers.put(row, 0, markerRow);
-                }
+                int cols = circles.cols();
+                for (int i = 0; i < cols; i++) {
+                    double[] c = circles.get(0, i);
+                    // c = { centerX, centerY, radius }, upscaled-ROI-local coordinates
+                    BallResult result = new BallResult();
+                    result.centerXSmall = c[0] / roiScale + roi.x;
+                    result.centerYSmall = c[1] / roiScale + roi.y;
+                    result.radiusSmall  = c[2] / roiScale;
 
-                // watershed() only uses this as a color-gradient source for flooding — it doesn't
-                // interpret channel order as RGB vs. BGR, so no RGB2BGR swap is needed here, only
-                // the RGBA->RGB channel-count drop (see watershedSrc's declaration above).
-                Imgproc.cvtColor(small, watershedSrc, Imgproc.COLOR_RGBA2RGB);
-                Imgproc.watershed(watershedSrc, freshMarkers);
-
-                double frameArea = small.cols() * small.rows();
-                double minArea = frameArea * MIN_AREA_FRACTION;
-                double maxArea = frameArea * MAX_AREA_FRACTION;
-
-                // PERFORMANCE: process each ball within a small ROI (region of
-                // interest) around its seed instead of operating on the whole
-                // frame. Previously, Core.compare/copyTo/minMaxLoc all ran on
-                // full-size Mats once PER BALL — with N balls that's N passes
-                // over the entire frame. A ROI sized generously around each
-                // seed cuts that down to a small crop per ball, independent
-                // of how many balls are in the frame.
-                //
-                // BUG THIS FIXES: this used to be sized off `maxArea` (frameArea *
-                // MAX_AREA_FRACTION). MAX_AREA_FRACTION was 1.0 (100% of the frame), so
-                // maxBallDim worked out larger than the frame in both dimensions and every
-                // candidate's "ROI" was silently the entire frame — for N candidates that's N
-                // full-frame Core.compare/findContours/moments passes per frame, which was the
-                // single largest contributor to a ~570ms pipeline frame. Sizing the pad off a
-                // much smaller, realistic "biggest a single ball could look" bound instead of the
-                // (now-fixed, but still deliberately generous) accept/reject ceiling restores an
-                // actual small per-ball crop.
-                int maxBallDim = (int) Math.ceil(Math.sqrt(frameArea * ROI_MAX_BALL_AREA_FRACTION)) * 2;
-                int roiPad = Math.max(8, maxBallDim);
-
-                for (double[] seed : seedCenters) {
-                    int label = (int) seed[2] + WS_SEED_LABEL_OFFSET;
-                    int seedCx = (int) seed[0];
-                    int seedCy = (int) seed[1];
-
-                    int roiX = Math.max(0, seedCx - roiPad);
-                    int roiY = Math.max(0, seedCy - roiPad);
-                    int roiW = Math.min(freshMarkers.cols() - roiX, roiPad * 2);
-                    int roiH = Math.min(freshMarkers.rows() - roiY, roiPad * 2);
-
-                    CandidateStats stats = new CandidateStats();
-                    stats.seedSmall = new Point(seed[0], seed[1]);
-                    candidates.add(stats);
-
-                    if (roiW <= 0 || roiH <= 0) {
-                        stats.rejectReason = "empty ROI";
+                    if (!hasYellowInterior(yellowMask, result)) {
+                        rejectedCount++;
                         continue;
                     }
-                    Rect roi = new Rect(roiX, roiY, roiW, roiH);
 
-                    // Per-seed native Mats. This loop runs once per candidate ball on every processed
-                    // frame, so anything not released here accumulates on the Control Hub's native
-                    // heap and crashes the process within a match — release them all in finally so no
-                    // early-out (`continue`) can leak. (offsetContour is kept in the BallResult for
-                    // the later draw pass and released after that; see below.)
-                    Mat markersRoi = freshMarkers.submat(roi);
-                    Mat regionMask = new Mat();
-                    List<MatOfPoint> regionContours = new ArrayList<>();
-                    MatOfPoint2f contour2f = null;
-                    Mat distRoi = null;
-                    Mat regionDist = null;
-                    try {
-                        Core.compare(markersRoi, new Scalar(label), regionMask, Core.CMP_EQ);
-                        regionMask.convertTo(regionMask, CvType.CV_8U, 255);
-
-                        Imgproc.findContours(regionMask, regionContours, contourHierarchy,
-                                Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
-
-                        if (regionContours.isEmpty()) {
-                            stats.rejectReason = "no contour";
-                            continue;
-                        }
-
-                        MatOfPoint contour = regionContours.get(0);
-                        double area = Imgproc.contourArea(contour);
-                        for (MatOfPoint c : regionContours) {
-                            double a = Imgproc.contourArea(c);
-                            if (a > area) { area = a; contour = c; }
-                        }
-
-                        contour2f = new MatOfPoint2f(contour.toArray());
-                        double perimeter = Imgproc.arcLength(contour2f, true);
-                        double circularity = perimeter > 0
-                                ? (4 * Math.PI * area) / (perimeter * perimeter)
-                                : 0;
-
-                        // Distance-transform peak, also restricted to the same ROI
-                        distRoi = distMat.submat(roi);
-                        regionDist = new Mat(distRoi.size(), distRoi.type(), Scalar.all(0));
-                        distRoi.copyTo(regionDist, regionMask);
-                        double peak = Core.minMaxLoc(regionDist).maxVal;
-
-                        double impliedRadius = Math.sqrt(area / Math.PI);
-                        double roundness = impliedRadius > 0 ? peak / impliedRadius : 0;
-
-                        // Every metric is computed before any threshold test so rejected
-                        // candidates still report a full set of numbers to telemetry.
-                        stats.areaFraction = area / frameArea;
-                        stats.circularity = circularity;
-                        stats.roundness = roundness;
-
-                        if (area < minArea) {
-                            stats.rejectReason = "area < min";
-                            continue;
-                        }
-                        if (area > maxArea) {
-                            stats.rejectReason = "area > max";
-                            continue;
-                        }
-                        if (circularity < MIN_CIRCULARITY) {
-                            stats.rejectReason = "circularity";
-                            continue;
-                        }
-                        if (roundness < MIN_ROUNDNESS_RATIO) {
-                            stats.rejectReason = "roundness";
-                            continue;
-                        }
-
-                        BallResult result = new BallResult();
-
-                        // The contour was found within a cropped ROI submat, so its
-                        // point coordinates are ROI-local. Offset every point by the
-                        // ROI's top-left corner to get back to full-small-image
-                        // coordinates before storing/using them anywhere downstream.
-                        Point[] roiLocalPts = contour.toArray();
-                        Point[] offsetPts = new Point[roiLocalPts.length];
-                        for (int i = 0; i < roiLocalPts.length; i++) {
-                            offsetPts[i] = new Point(roiLocalPts[i].x + roi.x, roiLocalPts[i].y + roi.y);
-                        }
-                        MatOfPoint offsetContour = new MatOfPoint(offsetPts);
-                        result.contourSmall = offsetContour;
-
-                        org.opencv.imgproc.Moments m = Imgproc.moments(offsetContour);
-                        result.centerSmall = new Point(
-                                m.m00 != 0 ? m.m10 / m.m00 : seed[0],
-                                m.m00 != 0 ? m.m01 / m.m00 : seed[1]);
-
-                        double contactX = offsetPts[0].x;
-                        double contactY = offsetPts[0].y;
-                        for (Point p : offsetPts) {
-                            if (p.y > contactY) {
-                                contactY = p.y;
-                                contactX = p.x;
-                            }
-                        }
-                        result.contactSmall = new Point(contactX, contactY);
-
-                        double fullResX = contactX / DETECTION_SCALE;
-                        double fullResY = contactY / DETECTION_SCALE;
-                        result.fieldPoint = transformPointToField(fullResX, fullResY);
-
-                        stats.ballIndex = results.size();
-                        results.add(result);
-                    } finally {
-                        markersRoi.release();
-                        regionMask.release();
-                        if (contour2f != null) contour2f.release();
-                        if (distRoi != null) distRoi.release();
-                        if (regionDist != null) regionDist.release();
-                        for (MatOfPoint c : regionContours) c.release();
-                    }
+                    candidates.add(result);
                 }
+            } finally {
+                circles.release();
+                roiGray.release();
             }
         }
 
+        // --- Step 5: drop overlapping detections, then map survivors to field ---
+        List<BallResult> results = suppressOverlaps(candidates);
+        int overlapCount = candidates.size() - results.size();
+
+        for (BallResult result : results) {
+            // Ground-contact point: analytically the lowest point on the
+            // circle, (cx, cy + r) — exact, since Hough gives us a true
+            // circle equation rather than a noisy pixel contour to hunt
+            // through for the "lowest point" the way the old pipeline did.
+            double contactXSmall = result.centerXSmall;
+            double contactYSmall = result.centerYSmall + result.radiusSmall;
+
+            double fullResX = contactXSmall / DETECTION_SCALE;
+            double fullResY = contactYSmall / DETECTION_SCALE;
+            result.fieldPoint = transformPointToField(fullResX, fullResY);
+        }
+
+        // --- Step 6: display ----------------------------------------------------
         if (DISPLAY_MODE == DisplayMode.MASK) {
-            Imgproc.resize(holeFilled, upscaledMask, input.size(), 0, 0, Imgproc.INTER_NEAREST);
+            Imgproc.resize(roiMask, upscaledMask, input.size(), 0, 0, Imgproc.INTER_NEAREST);
             Imgproc.cvtColor(upscaledMask, displayImage, Imgproc.COLOR_GRAY2RGB);
         }
 
@@ -658,65 +518,157 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
             }
         }
 
-        // Free the per-ball contour Mats now drawing is done (kept out of the per-seed finally
-        // specifically so this draw pass could use them).
-        for (int i = 0; i < results.size(); i++) {
-            if (results.get(i).contourSmall != null) results.get(i).contourSmall.release();
-        }
-
         drawOriginCrosshair(displayImage);
 
-        telemetry.addLine("[Detecting Yellow Balls]");
+        // --- Step 7: telemetry ---------------------------------------------------
+        telemetry.addLine("[Detecting Yellow Balls — Hough circle fit]");
+        telemetry.addData("ROIs searched", rois.size());
         telemetry.addData("Balls Detected", results.size());
+        telemetry.addData("Rejected (not yellow)", rejectedCount);
+        telemetry.addData("Rejected (overlap)", overlapCount);
+        telemetry.addData("Radius search (px)", String.format("%.1f - %.1f",
+                minBallRadiusSmall, maxBallRadiusSmall));
         for (int i = 0; i < results.size(); i++) {
-            Point fp = results.get(i).fieldPoint;
+            BallResult r = results.get(i);
             telemetry.addLine("--- Ball " + i + " ---");
-            telemetry.addData("  Field X (in)", String.format("%.2f", fp.x));
-            telemetry.addData("  Field Y (in)", String.format("%.2f", fp.y));
-        }
-
-        telemetry.addLine();
-        telemetry.addData("Thresholds", String.format(
-                "area %.5f-%.2f | circ >=%.2f | round >=%.2f | seedSep >=%.1fpx",
-                MIN_AREA_FRACTION, MAX_AREA_FRACTION, MIN_CIRCULARITY,
-                MIN_ROUNDNESS_RATIO, MIN_SEED_SEPARATION_PX));
-        telemetry.addData("Seeds", rawSeedCount + " raw -> " + candidates.size()
-                + " after " + MIN_SEED_SEPARATION_PX + "px merge");
-        telemetry.addData("Candidates", candidates.size() + " (" + results.size()
-                + " passed, " + (candidates.size() - results.size()) + " rejected)");
-        for (int i = 0; i < candidates.size(); i++) {
-            CandidateStats c = candidates.get(i);
-            telemetry.addLine(String.format("--- Cand %d @ (%.0f,%.0f) %s ---",
-                    i, c.seedSmall.x, c.seedSmall.y,
-                    c.rejectReason == null ? "BALL " + c.ballIndex : "REJECT: " + c.rejectReason));
-            telemetry.addData("  areaFrac", String.format("%.6f", c.areaFraction));
-            telemetry.addData("  circularity", String.format("%.3f", c.circularity));
-            telemetry.addData("  roundness", String.format("%.3f", c.roundness));
+            telemetry.addData("  Field X (in)", String.format("%.2f", r.fieldPoint.x));
+            telemetry.addData("  Field Y (in)", String.format("%.2f", r.fieldPoint.y));
+            telemetry.addData("  Radius (px)", String.format("%.1f", r.radiusSmall));
         }
         telemetry.update();
 
         return displayImage;
     }
 
+    /**
+     * Greedy non-maximum suppression over every circle found this frame,
+     * largest first. A hole, a glare ring or a shadow inside a ball fits a
+     * circle smaller than the ball's own outline, so preferring the larger
+     * radius keeps the ball and drops the artifact.
+     */
+    private static List<BallResult> suppressOverlaps(List<BallResult> candidates) {
+        Collections.sort(candidates, new Comparator<BallResult>() {
+            @Override public int compare(BallResult a, BallResult b) {
+                return Double.compare(b.radiusSmall, a.radiusSmall);
+            }
+        });
+
+        List<BallResult> kept = new ArrayList<>(candidates.size());
+        for (BallResult c : candidates) {
+            boolean overlaps = false;
+            for (BallResult k : kept) {
+                double dx = c.centerXSmall - k.centerXSmall;
+                double dy = c.centerYSmall - k.centerYSmall;
+                double dist = Math.sqrt(dx * dx + dy * dy);
+
+                // Second test catches an artifact sitting near a ball's rim,
+                // whose centre is outside the kept circle but which is far too
+                // close to be a separate ball.
+                if (dist <= k.radiusSmall
+                        || dist < MIN_CENTER_SEPARATION_FRACTION * (k.radiusSmall + c.radiusSmall)) {
+                    overlaps = true;
+                    break;
+                }
+            }
+            if (!overlaps) kept.add(c);
+        }
+        return kept;
+    }
+
+    /**
+     * Confirms a Hough circle actually sits on yellow pixels. Counts mask hits
+     * in the circle's bounding box against the area a circle would occupy in
+     * that box (pi/4 of it), so a ball clipped by the frame edge is judged on
+     * its visible part rather than being penalised for the missing half.
+     */
+    private boolean hasYellowInterior(Mat mask, BallResult r) {
+        int x0 = (int) Math.max(0, Math.round(r.centerXSmall - r.radiusSmall));
+        int y0 = (int) Math.max(0, Math.round(r.centerYSmall - r.radiusSmall));
+        int x1 = (int) Math.min(mask.cols(), Math.round(r.centerXSmall + r.radiusSmall));
+        int y1 = (int) Math.min(mask.rows(), Math.round(r.centerYSmall + r.radiusSmall));
+        if (x1 - x0 < 1 || y1 - y0 < 1) return false;
+
+        Mat box = mask.submat(new Rect(x0, y0, x1 - x0, y1 - y0));
+        try {
+            double circleArea = (Math.PI / 4.0) * box.cols() * box.rows();
+            return Core.countNonZero(box) >= MIN_YELLOW_FILL_FRACTION * circleArea;
+        } finally {
+            box.release();
+        }
+    }
+
+    /**
+     * Finds coarse candidate regions from the (loosely closed) color mask,
+     * pads each one out, and merges any that are close together into a
+     * single combined ROI. This is intentionally forgiving — its only job is
+     * to hand Hough a small region that PROBABLY contains a ball; Hough does
+     * the actual shape validation.
+     */
+    private List<Rect> findMergedRois(Mat mask) {
+        List<MatOfPoint> contours = new ArrayList<>();
+        Imgproc.findContours(mask, contours, contourHierarchy,
+                Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
+
+        List<Rect> padded = new ArrayList<>(contours.size());
+        for (MatOfPoint c : contours) {
+            Rect r = Imgproc.boundingRect(c);
+            c.release();
+            int x = Math.max(0, r.x - ROI_PAD_PX);
+            int y = Math.max(0, r.y - ROI_PAD_PX);
+            int w = Math.min(mask.cols() - x, r.width  + ROI_PAD_PX * 2);
+            int h = Math.min(mask.rows() - y, r.height + ROI_PAD_PX * 2);
+            if (w > 0 && h > 0) padded.add(new Rect(x, y, w, h));
+        }
+
+        // Merge ROIs that are close together (fragments of the same ball).
+        List<Rect> merged = new ArrayList<>();
+        boolean[] consumed = new boolean[padded.size()];
+        for (int i = 0; i < padded.size(); i++) {
+            if (consumed[i]) continue;
+            Rect current = padded.get(i);
+            consumed[i] = true;
+            boolean growing = true;
+            while (growing) {
+                growing = false;
+                for (int j = 0; j < padded.size(); j++) {
+                    if (consumed[j]) continue;
+                    if (rectsNear(current, padded.get(j), ROI_MERGE_DIST_PX)) {
+                        current = union(current, padded.get(j));
+                        consumed[j] = true;
+                        growing = true;
+                    }
+                }
+            }
+            merged.add(current);
+        }
+        return merged;
+    }
+
+    private static boolean rectsNear(Rect a, Rect b, int dist) {
+        Rect expandedA = new Rect(a.x - dist, a.y - dist, a.width + dist * 2, a.height + dist * 2);
+        return expandedA.x < b.x + b.width && expandedA.x + expandedA.width > b.x
+                && expandedA.y < b.y + b.height && expandedA.y + expandedA.height > b.y;
+    }
+
+    private static Rect union(Rect a, Rect b) {
+        int x1 = Math.min(a.x, b.x);
+        int y1 = Math.min(a.y, b.y);
+        int x2 = Math.max(a.x + a.width,  b.x + b.width);
+        int y2 = Math.max(a.y + a.height, b.y + b.height);
+        return new Rect(x1, y1, x2 - x1, y2 - y1);
+    }
+
     private void drawBallOverlay(Mat displayImage, BallResult r) {
         double scaleUp = 1.0 / DETECTION_SCALE;
 
-        Point[] smallPts = r.contourSmall.toArray();
-        Point[] fullPts  = new Point[smallPts.length];
-        for (int i = 0; i < smallPts.length; i++) {
-            fullPts[i] = new Point(smallPts[i].x * scaleUp, smallPts[i].y * scaleUp);
-        }
-        MatOfPoint fullContour = new MatOfPoint(fullPts);
-        List<MatOfPoint> singleContourList = new ArrayList<>();
-        singleContourList.add(fullContour);
-        Imgproc.drawContours(displayImage, singleContourList, -1, new Scalar(0, 255, 0), 2);
-        fullContour.release();
+        Point centerFull = new Point(r.centerXSmall * scaleUp, r.centerYSmall * scaleUp);
+        int radiusFull = (int) (r.radiusSmall * scaleUp);
 
-        Point centerFull  = new Point(r.centerSmall.x  * scaleUp, r.centerSmall.y  * scaleUp);
-        Point contactFull = new Point(r.contactSmall.x * scaleUp, r.contactSmall.y * scaleUp);
+        Imgproc.circle(displayImage, centerFull, radiusFull, new Scalar(0, 255, 0), 2);
+        Imgproc.circle(displayImage, centerFull, 4, new Scalar(255, 255, 0), -1); // center
 
-        Imgproc.circle(displayImage, centerFull,  5, new Scalar(255, 255, 0), -1);
-        Imgproc.circle(displayImage, contactFull, 5, new Scalar(0,   0, 255), -1);
+        Point contactFull = new Point(centerFull.x, centerFull.y + radiusFull);
+        Imgproc.circle(displayImage, contactFull, 5, new Scalar(0, 0, 255), -1);  // ground contact
 
         String label = String.format("(%.1f, %.1f)in", r.fieldPoint.x, r.fieldPoint.y);
         Imgproc.putText(displayImage, label,
@@ -726,34 +678,28 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
 
     /**
      * BOX display mode: draws a clean axis-aligned bounding rectangle around
-     * the ball (derived from its contour, scaled to full resolution) plus a
-     * solid label plate directly above the box showing the ball's index and
-     * its calculated field coordinates. The plate is sized to the text it
-     * contains and clamped to stay within the frame so it's always readable.
+     * the Hough-detected circle plus a solid label plate showing the ball's
+     * index and its calculated field coordinates.
      */
     private void drawBallBox(Mat displayImage, BallResult r, int ballIndex) {
         double scaleUp = 1.0 / DETECTION_SCALE;
 
-        // Scale the contour to full resolution, then take its bounding rect.
-        Point[] smallPts = r.contourSmall.toArray();
-        Point[] fullPts  = new Point[smallPts.length];
-        for (int i = 0; i < smallPts.length; i++) {
-            fullPts[i] = new Point(smallPts[i].x * scaleUp, smallPts[i].y * scaleUp);
-        }
-        MatOfPoint boxContour = new MatOfPoint(fullPts);
-        Rect box = Imgproc.boundingRect(boxContour);
-        boxContour.release();
+        double cxFull = r.centerXSmall * scaleUp;
+        double cyFull = r.centerYSmall * scaleUp;
+        double radiusFull = r.radiusSmall * scaleUp;
 
-        Scalar boxColor  = new Scalar(0, 255, 0);   // green
-        Scalar textColor = new Scalar(255, 255, 255); // white
+        Rect box = new Rect(
+                (int) (cxFull - radiusFull), (int) (cyFull - radiusFull),
+                (int) (radiusFull * 2), (int) (radiusFull * 2));
 
-        // Bounding box
+        Scalar boxColor  = new Scalar(0, 255, 0);
+        Scalar textColor = new Scalar(255, 255, 255);
+
         Imgproc.rectangle(displayImage,
                 new Point(box.x, box.y),
                 new Point(box.x + box.width, box.y + box.height),
                 boxColor, 2);
 
-        // Label text: ball number + field coordinates
         String label = String.format("#%d (%.1f, %.1f)in", ballIndex, r.fieldPoint.x, r.fieldPoint.y);
 
         int fontFace = Imgproc.FONT_HERSHEY_SIMPLEX;
@@ -766,26 +712,21 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
         int plateWidth  = (int) textSize.width  + padding * 2;
         int plateHeight = (int) textSize.height + baseline[0] + padding * 2;
 
-        // Place the plate directly above the box, matching the box width if
-        // the box is wider than the text needs, otherwise sized to the text.
         int plateDrawWidth = Math.max(plateWidth, box.width);
         int plateX = box.x;
         int plateY = box.y - plateHeight;
 
-        // Clamp so the plate never draws off the top or side edges of the frame
-        if (plateY < 0) plateY = box.y + box.height + 2; // fall back to below the box
+        if (plateY < 0) plateY = box.y + box.height + 2;
         if (plateX + plateDrawWidth > displayImage.cols()) {
             plateX = displayImage.cols() - plateDrawWidth;
         }
         if (plateX < 0) plateX = 0;
 
-        // Solid background plate for legible text over any background
         Imgproc.rectangle(displayImage,
                 new Point(plateX, plateY),
                 new Point(plateX + plateDrawWidth, plateY + plateHeight),
                 boxColor, -1);
 
-        // Text, vertically centered in the plate, left-aligned with padding
         Point textOrigin = new Point(
                 plateX + padding,
                 plateY + plateHeight - padding - baseline[0]);
@@ -800,11 +741,6 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
         return dst.toArray()[0];
     }
 
-    /**
-     * Inverse of transformPointToField: maps a field-space point (inches) back
-     * into image pixel coordinates, using the inverse homography. Used to draw
-     * the field-origin crosshair at the correct spot in the camera view.
-     */
     private Point transformFieldToPoint(double fieldX, double fieldY) {
         Mat inverseHomography = homography.inv();
         MatOfPoint2f src = new MatOfPoint2f(new Point(fieldX, fieldY));
@@ -814,22 +750,13 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
         return dst.toArray()[0];
     }
 
-    /**
-     * Draws a small crosshair at the field origin (0,0 inches), projected
-     * into image pixel space via the inverse homography. Helpful for sanity
-     * checking that the calibration's origin lines up with where you expect
-     * it on the physical field.
-     */
     private void drawOriginCrosshair(Mat displayImage) {
         if (homography == null || homography.empty()) return;
 
         Point originPixel = transformFieldToPoint(0.0, 0.0);
-        // originPixel is in full-resolution pixel space already (no
-        // DETECTION_SCALE division needed — the homography maps directly
-        // between full-res camera pixels and field inches).
 
         int size = 10;
-        Scalar color = new Scalar(255, 0, 255); // magenta — distinct from ball overlay colors
+        Scalar color = new Scalar(255, 0, 255);
 
         Imgproc.line(displayImage,
                 new Point(originPixel.x - size, originPixel.y),
@@ -878,10 +805,6 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
         return (h == null || h.empty()) ? null : h;
     }
 
-    /**
-     * Destination corners in real-world INCHES: corner(col, row) = (col, row).
-     * The resulting homography maps image pixels directly to field inches.
-     */
     private static MatOfPoint2f buildCalibrationDstCorners() {
         List<Point> dstList = new ArrayList<>();
         for (int row = 0; row < GRID_ROWS; row++) {
