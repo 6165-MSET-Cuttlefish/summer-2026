@@ -29,17 +29,20 @@ import java.util.List;
  *      start (robot)  ->  control 1  ->  control 2  ->  end (last ball)
  *    The 2 control points are SOLVED (not just placed at ball positions)
  *    so the curve passes exactly through the first two balls (in visit
- *    order) at fixed points along it (t = INTAKE_T1/T2). The 3rd ball is
+ *    order), at t-values proportional to their actual chord-length spacing
+ *    (see IntakeCurvePlanner.buildThroughCurve). The 3rd ball is
  *    the curve's actual endpoint, so it's touched exactly too. Heading
  *    stays tangent to the curve throughout.
  *
  *    EFFICIENCY: the intake is as wide as the whole robot
  *    (FieldVisualizer.INTAKE_WIDTH_IN), so a ball doesn't need to be an
  *    explicit point on the curve if driving straight past another stop
- *    already sweeps it up. essentialIntakeStops() drops any such ball
- *    first, so e.g. two balls sitting side-by-side within intake width of
- *    each other collapse into a single straight BezierLine instead of a
- *    curve bent to touch both centres - see buildIntakeCurve.
+ *    already sweeps it up. IntakeCurvePlanner.essentialStops() drops any
+ *    such ball first, so e.g. two balls sitting side-by-side within intake
+ *    width of each other collapse into a single straight BezierLine instead
+ *    of a curve bent to touch both centres - see buildIntakeCurve. This same
+ *    essential-stop curve is also what RouteOptimizer measures to pick the
+ *    ball visit order, so order-selection matches what's actually driven.
  *
  *  PATH 2 (return) - a straight BezierLine from wherever path 1 ends back
  *    to the original start pose. Heading interpolates linearly from the
@@ -74,13 +77,30 @@ import java.util.List;
 public class BallCollectionOpMode extends OpMode {
 
     // Tunable via Dashboard
-    public static double INTAKE_T1                 = 1.0 / 3.0; // where ball 1 sits on the curve (0-1)
-    public static double INTAKE_T2                 = 2.0 / 3.0; // where ball 2 sits on the curve (0-1)
     public static double TIMEOUT_MIN_AVG_SPEED_IPS  = 10.0;
     public static double TIMEOUT_MIN_SEC            = 4.0;
     public static double END_DISTANCE_TOLERANCE_IN  = 2.0;
     public static double END_VELOCITY_TOLERANCE     = 1.0;
     public static int    CURVE_CHECK_SAMPLES        = 60; // used only for the obstacle warning check
+
+    /**
+     * When true, the INTAKE leg (collecting the 3 balls) always drives the
+     * bigger-spline reroute - even if it still clips an obstacle in a tight
+     * cluster - instead of ever falling back to the guaranteed-safe
+     * straight-line polyline (see buildIntakeCurve). Lets you compare
+     * "spline-only ball collection" against the regular algorithm from the
+     * Dashboard.
+     *
+     * Only affects the intake leg. The RETURN leg (last ball -> start) is a
+     * separate, already-optimized path and is untouched by this toggle - it
+     * keeps using whichever of straight line / spline / polyline is
+     * shortest and obstacle-clear, same as always (see buildReturnPath).
+     *
+     * Leave false for actual runs: the polyline fallback is the only thing
+     * that guarantees the robot doesn't drive through an obstacle when the
+     * cluster is too tight for a spline to solve around.
+     */
+    public static boolean FORCE_SPLINE_ONLY         = false;
     public static int    run                        = 0;  // set to 1 to start
 
     private Follower follower;
@@ -102,6 +122,7 @@ public class BallCollectionOpMode extends OpMode {
     private boolean returnRerouted;      // true if path 2 had to dodge an obstacle (spline or hard fallback)
     private boolean intakeHardFallback;  // true if even the bigger-spline reroute still clipped something
     private boolean returnHardFallback;  // true if even the bigger-spline reroute still clipped something
+    private boolean intakeForcedThroughObstacle; // true if FORCE_SPLINE_ONLY drove the spline despite a collision
     private int intakeEssentialStopCount; // how many of the 3 balls the intake curve actually had to touch
 
     private Pose startPose;
@@ -286,14 +307,15 @@ public class BallCollectionOpMode extends OpMode {
 
     /**
      * PATH 1, normal case: a curve through only the ESSENTIAL stops (see
-     * essentialIntakeStops) - up to a cubic BezierCurve [start, c1, c2, end]
-     * when all 3 balls are essential, collapsing to a simpler curve/line
-     * when the wide intake sweeps some of them up for free. `end` is always
-     * the last ball in visit order (touched exactly, since it IS the
-     * curve's endpoint). When 2 interior balls ARE essential, c1/c2 are
-     * solved so the curve passes exactly through both at t = INTAKE_T1/T2 -
-     * see solveInteriorControls. Heading stays tangent to the curve
-     * throughout.
+     * IntakeCurvePlanner.essentialStops) - up to a cubic BezierCurve
+     * [start, c1, c2, end] when all 3 balls are essential, collapsing to a
+     * simpler curve/line when the wide intake sweeps some of them up for
+     * free. `end` is always the last ball in visit order (touched exactly,
+     * since it IS the curve's endpoint). When 2 interior balls ARE
+     * essential, c1/c2 are solved so the curve passes exactly through both,
+     * at t-values proportional to their chord-length spacing - see
+     * IntakeCurvePlanner.buildThroughCurve. Heading stays tangent to the
+     * curve throughout.
      *
      * If that curve would actually clip an obstacle, it's discarded in
      * favour of ONE BIGGER SPLINE - a BezierCurve.through(...) solved so it
@@ -315,12 +337,13 @@ public class BallCollectionOpMode extends OpMode {
                                   List<Obstacle> obstacles, double clearance) {
         Ball[] order = route.order;
         Pose end = order[2].toPose();
-        List<Pose> essentialStops = essentialIntakeStops(start, order);
+        List<Pose> essentialStops = IntakeCurvePlanner.essentialStops(start, order);
         intakeEssentialStopCount = essentialStops.size();
 
-        BezierCurve directCurve = buildThroughCurve(start, essentialStops);
-        intakeRerouted = firstCollision(directCurve, obstacles, clearance) != null;
+        BezierCurve directCurve = IntakeCurvePlanner.buildThroughCurve(start, essentialStops);
+        intakeRerouted = IntakeCurvePlanner.collides(directCurve, obstacles, clearance);
         intakeHardFallback = false;
+        intakeForcedThroughObstacle = false;
 
         if (!intakeRerouted) {
             intakeEndPose = end;
@@ -342,7 +365,9 @@ public class BallCollectionOpMode extends OpMode {
             }
 
             BezierCurve spline = BezierCurve.through(waypoints.toArray(new Pose[0]));
-            intakeHardFallback = firstCollision(spline, obstacles, clearance) != null;
+            boolean intakeSplineCollides = IntakeCurvePlanner.collides(spline, obstacles, clearance);
+            intakeHardFallback = !FORCE_SPLINE_ONLY && intakeSplineCollides;
+            intakeForcedThroughObstacle = FORCE_SPLINE_ONLY && intakeSplineCollides;
 
             if (!intakeHardFallback) {
                 intakeEndPose = waypoints.get(waypoints.size() - 1);
@@ -368,113 +393,6 @@ public class BallCollectionOpMode extends OpMode {
 
         double length = pathLength(intakeSamples);
         intakeTimeoutSec = Math.max(TIMEOUT_MIN_SEC, length / TIMEOUT_MIN_AVG_SPEED_IPS);
-    }
-
-    /**
-     * Which balls the intake curve actually needs to touch, in visit order -
-     * always ending at order[2] (the last ball is always essential, since
-     * it's where the route ends). A ball is dropped from this list if
-     * driving straight between two OTHER essential stops already sweeps it
-     * into the intake (see coveredByIntake), since the full-width intake
-     * collects it without the curve needing to bend there. E.g. two balls
-     * sitting side-by-side within intake width of each other collapse to a
-     * single stop, so the curve is a straight shot instead of a detour to
-     * each ball's exact centre.
-     *
-     * Checked in order of biggest shortcut first: can we skip BOTH interior
-     * balls (drive straight start -> last ball)? Then can we skip just the
-     * first, or just the second? Only visits all 3 explicitly if none of
-     * those shortcuts hold.
-     */
-    private static List<Pose> essentialIntakeStops(Pose start, Ball[] order) {
-        Pose o0 = order[0].toPose();
-        Pose o1 = order[1].toPose();
-        Pose o2 = order[2].toPose();
-        double intakeWidth = FieldVisualizer.INTAKE_WIDTH_IN;
-
-        if (coveredByIntake(start, o2, o0, intakeWidth) && coveredByIntake(start, o2, o1, intakeWidth)) {
-            return List.of(o2);
-        }
-        if (coveredByIntake(start, o1, o0, intakeWidth)) {
-            return List.of(o1, o2);
-        }
-        if (coveredByIntake(o0, o2, o1, intakeWidth)) {
-            return List.of(o0, o2);
-        }
-        return List.of(o0, o1, o2);
-    }
-
-    /**
-     * True if driving straight from a to b would sweep {@code ball} into the
-     * intake: its perpendicular distance from the segment is within half the
-     * intake width, AND its projection actually lands on the segment (not
-     * off one end, where the intake wouldn't reach it yet/anymore).
-     */
-    private static boolean coveredByIntake(Pose a, Pose b, Pose ball, double intakeWidth) {
-        double dx = b.getX() - a.getX();
-        double dy = b.getY() - a.getY();
-        double lenSq = dx * dx + dy * dy;
-        if (lenSq < 1e-9) return false;
-
-        double t = ((ball.getX() - a.getX()) * dx + (ball.getY() - a.getY()) * dy) / lenSq;
-        if (t < 0 || t > 1) return false;
-
-        double projX = a.getX() + t * dx;
-        double projY = a.getY() + t * dy;
-        return Math.hypot(ball.getX() - projX, ball.getY() - projY) <= intakeWidth / 2.0;
-    }
-
-    /**
-     * Builds the smallest curve that passes exactly through start and every
-     * essential stop: a straight BezierLine for 1 stop, an exact-through
-     * quadratic for 2, or the solved cubic (through both interior balls at
-     * INTAKE_T1/T2) for all 3.
-     */
-    private BezierCurve buildThroughCurve(Pose start, List<Pose> essentialStops) {
-        if (essentialStops.size() == 1) {
-            return new BezierLine(start, essentialStops.get(0));
-        }
-        if (essentialStops.size() == 2) {
-            return BezierCurve.through(start, essentialStops.get(0), essentialStops.get(1));
-        }
-        Pose ballA = essentialStops.get(0);
-        Pose ballB = essentialStops.get(1);
-        Pose end = essentialStops.get(2);
-        Pose[] controls = solveInteriorControls(start, end, ballA, ballB, INTAKE_T1, INTAKE_T2);
-        return new BezierCurve(start, controls[0], controls[1], end);
-    }
-
-    /**
-     * Solves for the 2 middle control points of a cubic Bezier so it passes
-     * exactly through ballA/ballB at the given t values, with fixed start
-     * (t=0) and end (t=1). Two independent 2x2 linear solves (X and Y),
-     * using the cubic Bernstein basis:
-     *   C(t) = (1-t)^3 P0 + 3(1-t)^2 t P1 + 3(1-t) t^2 P2 + t^3 P3
-     */
-    private static Pose[] solveInteriorControls(Pose start, Pose end, Pose ballA, Pose ballB,
-                                                double t1, double t2) {
-        double omt1 = 1 - t1, omt2 = 1 - t2;
-        double a1 = 3 * omt1 * omt1 * t1, b1 = 3 * omt1 * t1 * t1; // coeffs of P1, P2 at t1
-        double a2 = 3 * omt2 * omt2 * t2, b2 = 3 * omt2 * t2 * t2; // coeffs of P1, P2 at t2
-
-        double rhs1x = ballA.getX() - omt1 * omt1 * omt1 * start.getX() - t1 * t1 * t1 * end.getX();
-        double rhs1y = ballA.getY() - omt1 * omt1 * omt1 * start.getY() - t1 * t1 * t1 * end.getY();
-        double rhs2x = ballB.getX() - omt2 * omt2 * omt2 * start.getX() - t2 * t2 * t2 * end.getX();
-        double rhs2y = ballB.getY() - omt2 * omt2 * omt2 * start.getY() - t2 * t2 * t2 * end.getY();
-
-        double det = a1 * b2 - a2 * b1;
-        // det shouldn't be ~0 for distinct t1/t2 in (0,1); fall back to the
-        // raw ball positions if it somehow is, rather than dividing by ~0.
-        if (Math.abs(det) < 1e-9) {
-            return new Pose[]{ballA, ballB};
-        }
-
-        double p1x = (rhs1x * b2 - rhs2x * b1) / det;
-        double p1y = (rhs1y * b2 - rhs2y * b1) / det;
-        double p2x = (a1 * rhs2x - a2 * rhs1x) / det;
-        double p2y = (a1 * rhs2y - a2 * rhs1y) / det;
-
-        return new Pose[]{new Pose(p1x, p1y, 0), new Pose(p2x, p2y, 0)};
     }
 
     /**
@@ -515,7 +433,7 @@ public class BallCollectionOpMode extends OpMode {
             for (int j = 1; j < legPts.size(); j++) waypoints.add(legPts.get(j));
 
             BezierCurve spline = BezierCurve.through(waypoints.toArray(new Pose[0]));
-            returnHardFallback = firstCollision(spline, obstacles, clearance) != null;
+            returnHardFallback = IntakeCurvePlanner.collides(spline, obstacles, clearance);
 
             if (!returnHardFallback) {
                 returnPath = follower.pathBuilder()
@@ -565,17 +483,6 @@ public class BallCollectionOpMode extends OpMode {
     }
 
     // ===== shared curve/geometry helpers =====
-
-    /** First obstacle the actual BezierCurve (sampled via its own getPose) passes within `clearance` of, or null. */
-    private static Obstacle firstCollision(BezierCurve curve, List<Obstacle> obstacles, double clearance) {
-        for (int s = 0; s <= CURVE_CHECK_SAMPLES; s++) {
-            Pose p = curve.getPose((double) s / CURVE_CHECK_SAMPLES);
-            for (Obstacle o : obstacles) {
-                if (Math.hypot(p.getX() - o.x, p.getY() - o.y) <= o.radius + clearance) return o;
-            }
-        }
-        return null;
-    }
 
     /** First obstacle the sampled curve/line passes within `clearance` of, or null. */
     private static Obstacle firstCollision(Pose[] points, List<Obstacle> obstacles, double clearance) {
@@ -681,6 +588,10 @@ public class BallCollectionOpMode extends OpMode {
                 telemetry.addLine(returnHardFallback
                         ? "!! Return path hard-fallback to straight-line legs (obstacle cluster too tight for a spline)."
                         : "~ Return path bent into a bigger spline around an obstacle.");
+            }
+            if (intakeForcedThroughObstacle) {
+                telemetry.addLine("!! FORCE_SPLINE_ONLY is driving an intake spline that still clips an "
+                        + "obstacle (safety-net polyline fallback disabled) - testing only.");
             }
         }
 

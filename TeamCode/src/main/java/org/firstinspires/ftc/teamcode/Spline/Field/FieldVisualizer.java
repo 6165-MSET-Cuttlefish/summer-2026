@@ -92,7 +92,7 @@ public class FieldVisualizer {
     // whole front of the robot. Any ball within half this distance of a
     // straight-line pass gets swept up incidentally, without the intake
     // route needing to bend to touch it exactly - see
-    // BallCollectionOpMode.essentialIntakeStops(). Lower this if the intake
+    // IntakeCurvePlanner.essentialStops(). Lower this if the intake
     // is ever narrower than the chassis.
     public static double INTAKE_WIDTH_IN = ROBOT_SIZE_IN;
 
