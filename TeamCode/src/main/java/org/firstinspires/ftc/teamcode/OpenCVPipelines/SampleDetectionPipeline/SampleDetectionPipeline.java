@@ -62,7 +62,7 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
     //             coordinates. Best for a clean, presentation-style view.
     // -------------------------------------------------------------------------
     public enum DisplayMode { MASK, OVERLAY, BOX }
-    private static final DisplayMode DISPLAY_MODE = DisplayMode.MASK; // ← change here
+    private static final DisplayMode DISPLAY_MODE = DisplayMode.BOX; // ← change here
 
     // -------------------------------------------------------------------------
     // QUICK FIX APPLIED: every reported distance was exactly 2x too large.
@@ -167,7 +167,7 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
     // near-perfect circle, we accept anything "close enough" — a small notch
     // should not disqualify an otherwise round, correctly-sized blob.
     // -------------------------------------------------------------------------
-    private static final double MIN_AREA_FRACTION = 0.00005;
+    private static final double MIN_AREA_FRACTION = 0.0001;
     // Was 1 (100% of frame), which silently disabled the "too large to be a ball" rejection
     // entirely (nothing can ever exceed the whole frame) and, via the ROI-pad math below, made
     // every candidate's processing ROI the entire frame too. 0.15 still comfortably admits a ball
@@ -255,6 +255,11 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
     private final Mat ccCentroids   = new Mat();
     private final Mat freshMarkers  = new Mat();
     private final Mat upscaledMask  = new Mat();
+    // watershed() hard-asserts CV_8UC3 and aborts the process (not a catchable exception) on
+    // mismatch. EasyOpenCV hands processFrame() an RGBA (4-channel) Mat, so `small` — a plain
+    // resize of `input` — is 4-channel too; watershedSrc is the 3-channel conversion watershed
+    // actually needs.
+    private final Mat watershedSrc  = new Mat();
 
     private final MatOfPoint2f dstCorners;
 
@@ -473,11 +478,11 @@ public class SampleDetectionPipeline extends OpenCvPipeline {
                     freshMarkers.put(row, 0, markerRow);
                 }
 
-                // watershed() only uses `small` as a color-gradient source for flooding — it
-                // doesn't interpret channel order as RGB vs. BGR, so the RGB2BGR conversion that
-                // used to happen here was a wasted full-frame color-convert (and Mat alloc) every
-                // single frame.
-                Imgproc.watershed(small, freshMarkers);
+                // watershed() only uses this as a color-gradient source for flooding — it doesn't
+                // interpret channel order as RGB vs. BGR, so no RGB2BGR swap is needed here, only
+                // the RGBA->RGB channel-count drop (see watershedSrc's declaration above).
+                Imgproc.cvtColor(small, watershedSrc, Imgproc.COLOR_RGBA2RGB);
+                Imgproc.watershed(watershedSrc, freshMarkers);
 
                 double frameArea = small.cols() * small.rows();
                 double minArea = frameArea * MIN_AREA_FRACTION;
