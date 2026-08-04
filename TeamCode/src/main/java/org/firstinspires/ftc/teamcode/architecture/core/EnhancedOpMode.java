@@ -60,6 +60,9 @@ public abstract class EnhancedOpMode extends OpMode {
     private boolean running = false;
     private boolean stopRequested = false;
     private boolean isInit = false;
+    private boolean telemetryRenderedThisLoop = false;
+    private int loopDumpCounter = 0;
+    private String cachedLoopDump = "";
 
     private FieldMapRenderer field;
     private String cachedFieldHtml = "";
@@ -442,11 +445,17 @@ public abstract class EnhancedOpMode extends OpMode {
         int every = Math.max(1, telemetryEveryNLoops);
         if (every > 1 && (telemetryLoopCounter++ % every) != 0) {
             // Pending items carry over; calling update() here would cause partial-packet flicker.
+            telemetryRenderedThisLoop = false;
             return;
         }
+        telemetryRenderedThisLoop = true;
 
         DualTelemetry.enableDSTelemetry = telemetryToggles.dsTelemetry;
         DualTelemetry.enableDashboardTelemetry = telemetryToggles.dashboardTelemetry;
+
+        // Dashboard data goes into the packet that also carries the field overlay, so exactly one
+        // complete frame is sent per loop. Re-set every loop: updateDashboard swaps in a fresh packet.
+        robot.telemetry.setPacket(robot.packet);
 
         // Pedro's getPose() allocates a fresh Pose each call; read once for the whole render pass.
         Pose currentPose = robot.follower.getPose();
@@ -473,10 +482,13 @@ public abstract class EnhancedOpMode extends OpMode {
                     Map.Entry<String, Double> entry = snapshot.get(i);
                     et.addDashboardData(entry.getKey(), "%.2fms", entry.getValue());
                 }
-                // Single copy-pasteable dashboard value: whole-run per-section avg/peak/count.
-                double loopAvg = profiledLoopCount == 0 ? 0 : profiledLoopSumMs / profiledLoopCount;
-                et.addDashboardData("LOOP_DUMP",
-                        profiler.report(profiledLoopCount, loopAvg, profiledLoopMaxMs));
+                // Single copy-pasteable dashboard value: whole-run per-section avg/peak/count. Rebuilt
+                // rarely — it's ~60 String.formats and, being cumulative, barely moves loop to loop.
+                if ((loopDumpCounter++ % 25) == 0) {
+                    double loopAvg = profiledLoopCount == 0 ? 0 : profiledLoopSumMs / profiledLoopCount;
+                    cachedLoopDump = profiler.report(profiledLoopCount, loopAvg, profiledLoopMaxMs);
+                }
+                et.addDashboardData("LOOP_DUMP", cachedLoopDump);
             }
 
             renderFieldMap(currentPose);
@@ -516,8 +528,11 @@ public abstract class EnhancedOpMode extends OpMode {
     }
 
     protected void updateDashboard() {
+        // Only send a frame carrying BOTH the routed telemetry data and the overlay. Sending one without
+        // the other blanks that half for a frame, which reads as flicker; skipping the send entirely
+        // just leaves the previous complete frame up.
         int every = Math.max(1, dashboardEveryNLoops);
-        if (every > 1 && (dashboardLoopCounter++ % every) != 0) {
+        if (!telemetryRenderedThisLoop || (every > 1 && (dashboardLoopCounter++ % every) != 0)) {
             // Fresh packet discards draws accumulated this loop, which would otherwise pile up across skipped loops.
             robot.packet = new TelemetryPacket(false);
             return;

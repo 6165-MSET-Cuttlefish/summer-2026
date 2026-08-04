@@ -1,6 +1,7 @@
 package org.firstinspires.ftc.teamcode.architecture.telemetry;
 
 import androidx.annotation.Nullable;
+import com.acmerobotics.dashboard.telemetry.TelemetryPacket;
 import org.firstinspires.ftc.robotcore.external.Func;
 import org.firstinspires.ftc.robotcore.external.Telemetry;
 
@@ -14,6 +15,7 @@ public class DualTelemetry implements Telemetry {
 
     private final Telemetry dsTelemetry;
     private final Telemetry dashTelemetry;
+    private TelemetryPacket packet;
     private int defaultFontSize = FONT_NORMAL;
     private boolean dsFormatApplied = false;
     private static final Item EMPTY_ITEM = new EnhancedItem(null, null);
@@ -44,6 +46,26 @@ public class DualTelemetry implements Telemetry {
     public void setDefaultFontSize(int size) { this.defaultFontSize = size; }
     public int getDefaultFontSize() { return defaultFontSize; }
 
+    /**
+     * Route dashboard data into {@code packet} (the same one carrying the field overlay) instead of
+     * FtcDashboard's telemetry adapter. The adapter's {@code update()} sends a packet of its own whose
+     * field overlay is empty; alternating that with the overlay packet is what makes the field view
+     * flicker at loop rate. One packet per loop carrying both halves fixes it. Null restores the adapter.
+     */
+    public void setPacket(TelemetryPacket packet) { this.packet = packet; }
+
+    private void dashPut(String caption, Object value) {
+        if (!enableDashboardTelemetry) return;
+        if (packet != null) packet.put(caption, value);
+        else dashTelemetry.addData(caption, value);
+    }
+
+    private void dashAddLine(String line) {
+        if (!enableDashboardTelemetry) return;
+        if (packet != null) packet.addLine(line);
+        else dashTelemetry.addLine(line);
+    }
+
     private String fmtCaption(String caption) {
         return htmlSize(defaultFontSize, htmlBold(htmlEscape(caption)));
     }
@@ -58,7 +80,7 @@ public class DualTelemetry implements Telemetry {
 
     public void addGroupHeader(String groupName, String color) {
         if (enableDSTelemetry) dsTelemetry.addLine(htmlBold(htmlColorSize(color, FONT_LARGE, htmlEscape(groupName))));
-        if (enableDashboardTelemetry) dashTelemetry.addLine("-------- " + groupName + " --------");
+        dashAddLine("-------- " + groupName + " --------");
     }
 
     public void addSubgroupHeader(String subgroupName) {
@@ -67,12 +89,12 @@ public class DualTelemetry implements Telemetry {
 
     public void addSubgroupHeader(String subgroupName, String color) {
         if (enableDSTelemetry) dsTelemetry.addLine(htmlBold(htmlColorSize(color, FONT_NORMAL, "▸ " + htmlEscape(subgroupName))));
-        if (enableDashboardTelemetry) dashTelemetry.addLine("  » " + subgroupName);
+        dashAddLine("  » " + subgroupName);
     }
 
     public void addSeparator() {
         if (enableDSTelemetry) dsTelemetry.addLine(SEPARATOR_HTML);
-        if (enableDashboardTelemetry) dashTelemetry.addLine("");
+        dashAddLine("");
     }
 
     public void addModuleHeader(String moduleName, String stateString) {
@@ -81,7 +103,7 @@ public class DualTelemetry implements Telemetry {
                     htmlColor(COLOR_MODULE, htmlBold(htmlEscape(moduleName))),
                     htmlColor(COLOR_STATE, htmlEscape(stateString)));
         }
-        if (enableDashboardTelemetry) dashTelemetry.addData(moduleName, stateString);
+        dashPut(moduleName, stateString);
     }
 
     public Item addDSLargeData(String caption, Object value) {
@@ -113,13 +135,12 @@ public class DualTelemetry implements Telemetry {
     }
 
     public DualTelemetry addDashboardData(String caption, Object value) {
-        if (enableDashboardTelemetry) dashTelemetry.addData(caption, value);
+        dashPut(caption, value);
         return this;
     }
 
     public DualTelemetry addDashboardData(String caption, String format, Object... args) {
-        // Dashboard formats lazily, so forward without pre-formatting.
-        if (enableDashboardTelemetry) dashTelemetry.addData(caption, format, args);
+        dashPut(caption, String.format(format, args));
         return this;
     }
 
@@ -131,9 +152,11 @@ public class DualTelemetry implements Telemetry {
         Item dsItem = enableDSTelemetry
                 ? dsTelemetry.addData(fmtCaption(caption), fmtValue(String.format(format, args)))
                 : null;
-        Item dashItem = enableDashboardTelemetry
-                ? dashTelemetry.addData(caption, format, args)
-                : null;
+        Item dashItem = null;
+        if (enableDashboardTelemetry) {
+            if (packet != null) packet.put(caption, String.format(format, args));
+            else dashItem = dashTelemetry.addData(caption, format, args);
+        }
         return new EnhancedItem(dsItem, dashItem);
     }
 
@@ -145,9 +168,11 @@ public class DualTelemetry implements Telemetry {
         Item dsItem = enableDSTelemetry
                 ? dsTelemetry.addData(fmtCaption(caption), fmtValue(value))
                 : null;
-        Item dashItem = enableDashboardTelemetry
-                ? dashTelemetry.addData(caption, value)
-                : null;
+        Item dashItem = null;
+        if (enableDashboardTelemetry) {
+            if (packet != null) packet.put(caption, value);
+            else dashItem = dashTelemetry.addData(caption, value);
+        }
         return new EnhancedItem(dsItem, dashItem);
     }
 
@@ -160,9 +185,11 @@ public class DualTelemetry implements Telemetry {
         Item dsItem = enableDSTelemetry
                 ? dsTelemetry.addData(fmtCaption(caption), htmlProducer)
                 : null;
-        Item dashItem = enableDashboardTelemetry
-                ? dashTelemetry.addData(caption, valueProducer)
-                : null;
+        Item dashItem = null;
+        if (enableDashboardTelemetry) {
+            if (packet != null) packet.put(caption, valueProducer.value());
+            else dashItem = dashTelemetry.addData(caption, valueProducer);
+        }
         return new EnhancedItem(dsItem, dashItem);
     }
 
@@ -175,9 +202,11 @@ public class DualTelemetry implements Telemetry {
         Item dsItem = enableDSTelemetry
                 ? dsTelemetry.addData(fmtCaption(caption), htmlProducer)
                 : null;
-        Item dashItem = enableDashboardTelemetry
-                ? dashTelemetry.addData(caption, format, valueProducer)
-                : null;
+        Item dashItem = null;
+        if (enableDashboardTelemetry) {
+            if (packet != null) packet.put(caption, String.format(format, valueProducer.value()));
+            else dashItem = dashTelemetry.addData(caption, format, valueProducer);
+        }
         return new EnhancedItem(dsItem, dashItem);
     }
 
@@ -239,7 +268,9 @@ public class DualTelemetry implements Telemetry {
         // Telemetry contract: true if transmitted. Fan-out → "any backend transmitted".
         if (!enableDSTelemetry && !enableDashboardTelemetry) return true;
         boolean ds = enableDSTelemetry && dsTelemetry.update();
-        boolean dash = enableDashboardTelemetry && dashTelemetry.update();
+        // packet != null: EnhancedOpMode sends the shared packet, so the adapter must NOT send a
+        // second overlay-less one — that alternation is the field-view flicker.
+        boolean dash = enableDashboardTelemetry && (packet != null || dashTelemetry.update());
         return ds || dash;
     }
 
