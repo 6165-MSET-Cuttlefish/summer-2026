@@ -65,7 +65,7 @@ public class PredictiveBrakingUltrasonicTest extends OpMode {
     public void init() {
         frontLeft  = initMotor("fl");
         backLeft   = initMotor("bl");
-        frontRight = initMotor("fr");
+        frontRight = initMotor("fr");   
         backRight  = initMotor("br");
 
         sonar = hardwareMap.get(MaxSonarI2CXL.class, "sonar");
@@ -114,16 +114,26 @@ public class PredictiveBrakingUltrasonicTest extends OpMode {
         double closingCmPerSec = braking.getClosingVelocityCmPerSec();
 
         telemetry.addData("distance cm",  "%.0f", cm);
+        telemetry.addData("model cm",     "%.1f", braking.getModelDistanceCm());
+        telemetry.addData("model cm/s",   "%.1f", braking.getModelVelocityCmPerSec());
+        telemetry.addData("stop dist cm", "%.1f", braking.getStoppingDistanceCm());
         telemetry.addData("predicted cm", "%.1f", predictedCm);
         telemetry.addData("closing cm/s", "%.1f", closingCmPerSec);
         telemetry.addData("power",        "%.3f", power);
         telemetry.addData("ceiling",      "%.3f", braking.getPowerCeiling());
         telemetry.addData("braking",      braking.isBraking());
+        telemetry.addData("rev brake",    braking.isReverseBraking());
+        telemetry.addData("stall escape", braking.isStallEscaping());
+        telemetry.addData("settling",     braking.isSettling());
         telemetry.addData("stopped",      braking.isStopped());
         telemetry.update();
 
         TelemetryPacket packet = new TelemetryPacket();
         packet.put("distance_cm",  cm);
+        packet.put("current_cm",   braking.getCurrentDistanceCm());
+        packet.put("model_cm",     braking.getModelDistanceCm());
+        packet.put("model_cm_s",   braking.getModelVelocityCmPerSec());
+        packet.put("stop_dist_cm", braking.getStoppingDistanceCm());
         packet.put("predicted_cm", predictedCm);
         packet.put("closing_cm_s", closingCmPerSec);
         packet.put("power",        power);
